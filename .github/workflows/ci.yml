@@ -34,7 +34,7 @@ jobs:
         # Only install on Ubuntu
         if: matrix.os == 'ubuntu-latest'
         
-      - name: Install libusb (windows)
+      - name: Install libftdi (windows)
         uses: lukka/run-vcpkg@v3
         with:
           vcpkgArguments: 'libftdi1:x64-windows'
@@ -42,6 +42,11 @@ jobs:
           vcpkgGitCommitId: '6ed0bc982bf9bdca25439d538f7f272786a7af4d' 
           vcpkgTriplet: x64-windows
         if: matrix.os == 'windows-latest'
+        
+      - name: Installlibftdi (macos)
+        run: brew install libftdi
+        # Only install on macos
+        if: matrix.os == 'macos-latest'
 
       - name: Install stable toolchain
         uses: actions-rs/toolchain@v1
@@ -52,8 +57,7 @@ jobs:
       - name: Run cargo build
         uses: actions-rs/cargo@v1
         with:
-          command: build 
-          args: -vv
+          command: build
 
   test:
     name: Test Suite
