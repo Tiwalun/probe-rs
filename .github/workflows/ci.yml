@@ -16,6 +16,7 @@ jobs:
         os:
           - ubuntu-latest
           - windows-latest
+          - macos-latest
 
     runs-on: ${{ matrix.os }}
     
@@ -33,10 +34,6 @@ jobs:
         # Only install on Ubuntu
         if: matrix.os == 'ubuntu-latest'
         
-      - name: Install cmake
-        uses: lukka/get-cmake@master
-        if: matrix.os == 'windows-latest'
-
       - name: Install libusb (windows)
         uses: lukka/run-vcpkg@v3
         with:
