@@ -49,7 +49,8 @@ jobs:
       - name: Run cargo build
         uses: actions-rs/cargo@v1
         with:
-          command: build -vv
+          command: build 
+          args: -vv
 
   test:
     name: Test Suite
