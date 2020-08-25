@@ -32,12 +32,17 @@ jobs:
           sudo apt install -y libusb-dev libusb-1.0
         # Only install on Ubuntu
         if: matrix.os == 'ubuntu-latest'
+        
+      - name: Install cmake
+        uses: lukka/get-cmake@master
+        if: matrix.os == 'windows-latest'
 
       - name: Install libusb (windows)
         uses: lukka/run-vcpkg@v3
         with:
           vcpkgArguments: 'libftdi1:x64-windows'
           vcpkgGitCommitId: '6185aa76504a5025f36754324abf307cc776f3da' # 2020.06
+          vcpkgTriplet: x64-windows
         if: matrix.os == 'windows-latest'
 
       - name: Install stable toolchain
