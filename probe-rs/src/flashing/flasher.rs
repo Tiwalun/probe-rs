@@ -240,7 +240,7 @@ impl<'session> Flasher<'session> {
     ) -> Result<()> {
         // Convert the list of flash operations into flash sectors and pages.
         let mut flash_layout = flash_builder
-            .build_sectors_and_pages(&self.flash_algorithm().clone(), restore_unwritten_bytes)?;
+            .build_sectors_and_pages(&self.flash_algorithm(), restore_unwritten_bytes)?;
 
         progress.initialized(flash_layout.clone());
 
@@ -289,6 +289,18 @@ impl<'session> Flasher<'session> {
         } else {
             self.program_simple(&flash_layout, progress)?;
         };
+
+        // Verify that flashing was succesful.
+        let mut core = self.session.core(0)?;
+        for block in flash_builder.data_blocks() {
+            let mut buff = vec![0; block.size() as usize];
+
+            core.read_8(block.address(), &mut buff)?;
+
+            if buff != block.data() {
+                return Err(anyhow!("Error while verifying programmed data."));
+            }
+        }
 
         Ok(())
     }

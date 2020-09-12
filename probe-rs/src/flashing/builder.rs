@@ -57,7 +57,7 @@ pub struct FlashSector {
 }
 
 impl FlashSector {
-    /// Creates a new empty flash sector form a `SectorInfo`.
+    /// Creates a new empty flash sector from a `SectorInfo`.
     fn new(sector_info: &SectorInfo) -> Self {
         Self {
             address: sector_info.base_address,
@@ -173,6 +173,10 @@ impl<'data> FlashDataBlock<'data> {
     pub(super) fn size(&self) -> u32 {
         self.data.len() as u32
     }
+
+    pub fn data(&self) -> &'data [u8] {
+        self.data
+    }
 }
 
 /// A block of data that is to be written to flash.
@@ -215,6 +219,8 @@ impl<'data> From<&FlashDataBlock<'data>> for FlashDataBlockSpan {
 /// A helper structure to build a flash layout from a set of data blocks.
 #[derive(Default)]
 pub(super) struct FlashBuilder<'data> {
+    /// A sorted list of data blocks, which
+    /// contain the data which should be flashed.
     data_blocks: Vec<FlashDataBlock<'data>>,
 }
 
@@ -224,6 +230,10 @@ impl<'data> FlashBuilder<'data> {
         Self {
             data_blocks: vec![],
         }
+    }
+
+    pub fn data_blocks(&self) -> &[FlashDataBlock<'_>] {
+        &self.data_blocks
     }
 
     /// Add a block of data to be programmed.
@@ -272,6 +282,9 @@ impl<'data> FlashBuilder<'data> {
     }
 
     /// Layouts the contents of a flash memory according to the contents of the flash builder.
+    ///
+    /// If `include_empty_pages` is true, we read back partially written pages initially,
+    /// so that the containing data is not erased.
     pub(super) fn build_sectors_and_pages(
         &self,
         flash_algorithm: &FlashAlgorithm,

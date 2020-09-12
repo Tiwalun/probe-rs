@@ -38,19 +38,14 @@ impl<'mmap, 'data> FlashLoader<'mmap, 'data> {
             let possible_region = Self::get_region_for_address(self.memory_map, address);
             // If we found a corresponding region, create a builder.
             if let Some(MemoryRegion::Flash(region)) = possible_region {
-                // Get our builder instance.
-                if !self.builders.contains_key(region) {
-                    self.builders.insert(region.clone(), FlashBuilder::new());
-                };
+                let builder = self.builders.entry(region.clone()).or_default();
 
                 // Determine how much more data can be contained by this region.
                 let program_length =
                     usize::min(remaining, (region.range.end - address + 1) as usize);
 
                 // Add as much data to the builder as can be contained by this region.
-                self.builders
-                    .get_mut(&region)
-                    .map(|r| r.add_data(address, &data[size - remaining..program_length]));
+                builder.add_data(address, &data[size - remaining..program_length])?;
 
                 // Advance the cursors.
                 remaining -= program_length;
@@ -71,9 +66,9 @@ impl<'mmap, 'data> FlashLoader<'mmap, 'data> {
     ) -> Option<&MemoryRegion> {
         for region in memory_map {
             let r = match region {
-                MemoryRegion::Ram(r) => r.range.clone(),
-                MemoryRegion::Flash(r) => r.range.clone(),
-                MemoryRegion::Generic(r) => r.range.clone(),
+                MemoryRegion::Ram(r) => &r.range,
+                MemoryRegion::Flash(r) => &r.range,
+                MemoryRegion::Generic(r) => &r.range,
             };
             if r.contains(&address) {
                 return Some(region);
