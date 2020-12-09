@@ -28,6 +28,8 @@ pub trait ArmProbe {
     fn write_32(&mut self, ap: MemoryAP, address: u32, data: &[u32]) -> Result<(), Error>;
 
     fn flush(&mut self) -> Result<(), Error>;
+
+    fn get_arm_communication_interface(&mut self) -> Result<&mut ArmCommunicationInterface, Error>;
 }
 
 /// A struct to give access to a targets memory using a certain DAP.
@@ -570,6 +572,7 @@ where
     }
 }
 
+/*
 impl<AP> ArmProbe for ADIMemoryInterface<'_, AP>
 where
     AP: CommunicationInterface
@@ -577,7 +580,9 @@ where
         + APAccess<MemoryAP, TAR>
         + APAccess<MemoryAP, DRW>
         + DPAccess,
-{
+        */
+
+impl ArmProbe for ADIMemoryInterface<'_, ArmCommunicationInterface> {
     fn read_core_reg(&mut self, ap: MemoryAP, addr: CoreRegisterAddress) -> Result<u32, Error> {
         // Write the DCRSR value to select the register we want to read.
         let mut dcrsr_val = Dcrsr(0);
@@ -657,6 +662,10 @@ where
         self.interface.flush()?;
 
         Ok(())
+    }
+
+    fn get_arm_communication_interface(&mut self) -> Result<&mut ArmCommunicationInterface, Error> {
+        Ok(self.interface)
     }
 }
 

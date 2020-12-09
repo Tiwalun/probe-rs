@@ -1,4 +1,4 @@
-use crate::error;
+use crate::{architecture::arm::ArmCommunicationInterface, error};
 use crate::{
     architecture::arm::{ap::MemoryAP, memory::adi_v5_memory_interface::ArmProbe},
     CoreRegisterAddress,
@@ -52,6 +52,8 @@ pub trait MemoryInterface {
     /// can be called.  Takes no arguments, but may return failure if a batched
     /// operation fails.
     fn flush(&mut self) -> Result<(), error::Error>;
+
+    fn get_arm_interface(&mut self) -> Result<&mut ArmCommunicationInterface, error::Error>;
 }
 
 impl<T> MemoryInterface for &mut T
@@ -92,6 +94,10 @@ where
 
     fn flush(&mut self) -> Result<(), error::Error> {
         (*self).flush()
+    }
+
+    fn get_arm_interface(&mut self) -> Result<&mut ArmCommunicationInterface, crate::Error> {
+        todo!()
     }
 }
 
@@ -160,6 +166,10 @@ impl<'probe> Memory<'probe> {
         value: u32,
     ) -> Result<(), error::Error> {
         self.inner.write_core_reg(self.ap_sel, addr, value)
+    }
+
+    pub fn get_arm_interface(&mut self) -> Result<&mut ArmCommunicationInterface, error::Error> {
+        self.inner.get_arm_communication_interface()
     }
 }
 

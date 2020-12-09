@@ -1670,6 +1670,12 @@ impl ArmProbe for StLinkMemoryInterface<'_> {
 
         Ok(())
     }
+
+    fn get_arm_communication_interface(
+        &mut self,
+    ) -> Result<&mut crate::architecture::arm::ArmCommunicationInterface, ProbeRsError> {
+        todo!()
+    }
 }
 
 #[cfg(test)]
