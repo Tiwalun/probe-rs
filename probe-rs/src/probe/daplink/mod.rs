@@ -483,6 +483,8 @@ impl DebugProbe for DAPLink {
 
         self.configure_swd(swd::configure::ConfigureRequest {})?;
 
+        // The following sequence is the DebugPortSetup sequence from the ARM debug sequences
+
         // SWJ-DP defaults to JTAG operation on powerup reset
         // Switching from JTAG to SWD operation
 

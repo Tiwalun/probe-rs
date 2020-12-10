@@ -579,6 +579,8 @@ impl DebugProbe for JLink {
                 log::debug!("IDCODE: {:#010x}", idcode);
             }
             WireProtocol::Swd => {
+                // The following sequence is the DebugPortSetup sequence from the ARM debug sequences
+
                 // Construct the JTAG to SWD sequence.
                 let jtag_to_swd_sequence = [
                     false, true, true, true, true, false, false, true, true, true, true, false,
