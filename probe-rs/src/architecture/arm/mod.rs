@@ -4,6 +4,7 @@ pub mod component;
 pub(crate) mod core;
 pub mod dp;
 pub mod memory;
+mod sequences;
 pub mod swo;
 
 pub use communication_interface::{

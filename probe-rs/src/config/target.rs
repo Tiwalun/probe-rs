@@ -1,7 +1,13 @@
+use std::sync::Arc;
+
 use super::chip::Chip;
 use super::flash_algorithm::RawFlashAlgorithm;
 use super::memory::MemoryRegion;
-use crate::core::{Architecture, CoreType};
+use crate::{
+    architecture::arm::ArmCommunicationInterface,
+    core::{Architecture, CoreType},
+    DebugProbeError, Error, Memory,
+};
 
 /// This describes a complete target with a fixed chip model and variant.
 #[derive(Clone)]
@@ -14,6 +20,7 @@ pub struct Target {
     pub core_type: CoreType,
     /// The memory map of the target.
     pub memory_map: Vec<MemoryRegion>,
+    pub debug_sequence: Arc<DebugSequence>,
 }
 
 impl std::fmt::Debug for Target {
@@ -45,6 +52,7 @@ impl Target {
             flash_algorithms,
             core_type,
             memory_map: chip.memory_map.clone().into_owned(),
+            debug_sequence: Arc::new(DebugSequence::Riscv),
         }
     }
 
@@ -104,4 +112,36 @@ impl From<Target> for TargetSelector {
     fn from(target: Target) -> Self {
         TargetSelector::Specified(target)
     }
+}
+
+pub enum DebugSequence {
+    Arm(Box<dyn ArmDebugSequence>),
+    Riscv,
+}
+
+pub trait ArmDebugSequence: Send + Sync {
+    fn reset_hardware_assert(&self, interface: &mut Memory) -> Result<(), Error>;
+    fn reset_hardware_deassert(&self, interface: &mut Memory) -> Result<(), Error>;
+
+    fn debug_port_setup(&self, interface: &mut Memory) -> Result<(), Error>;
+
+    fn debug_port_start(&self, interface: &mut Memory) -> Result<(), Error>;
+
+    fn debug_device_unlock(&self, interface: &mut Memory) -> Result<(), Error> {
+        // Empty by default
+        Ok(())
+    }
+
+    fn debug_core_start(&self, interface: &mut Memory) -> Result<(), Error>;
+
+    fn recover_support_start(&self, interface: &mut Memory) -> Result<(), Error> {
+        // Empty by default
+        Ok(())
+    }
+
+    fn reset_catch_set(&self, interface: &mut Memory) -> Result<(), Error>;
+
+    fn reset_catch_clear(&self, interface: &mut Memory) -> Result<(), Error>;
+
+    fn reset_system(&self, interface: &mut Memory) -> Result<(), Error>;
 }
