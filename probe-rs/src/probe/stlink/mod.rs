@@ -319,6 +319,19 @@ impl DAPAccess for STLink<STLinkUSBDevice> {
     fn into_probe(self: Box<Self>) -> Box<dyn DebugProbe> {
         self
     }
+
+    fn swj_sequence(&mut self, _bit_len: u8, _bits: u64) -> Result<(), DebugProbeError> {
+        Err(DebugProbeError::CommandNotSupportedByProbe)
+    }
+
+    fn swj_pins(
+        &mut self,
+        _pin_out: u32,
+        _pin_select: u32,
+        _pin_wait: u32,
+    ) -> Result<u32, DebugProbeError> {
+        Err(DebugProbeError::CommandNotSupportedByProbe)
+    }
 }
 
 impl<'a> AsRef<dyn DebugProbe + 'a> for STLink<STLinkUSBDevice> {
@@ -1357,7 +1370,7 @@ impl<'probe> ArmProbeInterface for StlinkArmDebug {
         Probe::from_attached_probe(self.probe)
     }
 
-    fn swj_sequence(&mut self, _bit_len: usize, _bits: u64) -> Result<(), ProbeRsError> {
+    fn swj_sequence(&mut self, _bit_len: u8, _bits: u64) -> Result<(), ProbeRsError> {
         // This is not supported for ST-Links, unfortunately.
         Err(DebugProbeError::CommandNotSupportedByProbe.into())
     }

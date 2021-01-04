@@ -3,10 +3,6 @@ use super::{FlashBuilder, FlashError, FlashFill, FlashLayout, FlashPage};
 use crate::config::{FlashAlgorithm, FlashRegion, MemoryRange};
 use crate::memory::MemoryInterface;
 use crate::{
-    architecture::arm::m33::{Demcr, Dhcsr},
-    CoreRegister,
-};
-use crate::{
     core::{Architecture, RegisterFile},
     session::Session,
     Core, CoreRegisterAddress,

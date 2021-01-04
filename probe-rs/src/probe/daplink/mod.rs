@@ -24,7 +24,7 @@ use commands::{
     swd,
     swj::{
         clock::{SWJClockRequest, SWJClockResponse},
-        pins::{SWJPinsRequestBuilder, SWJPinsResponse},
+        pins::{Pins, SWJPinsRequest, SWJPinsRequestBuilder, SWJPinsResponse},
         sequence::{SequenceRequest, SequenceResponse},
     },
     swo,
@@ -720,6 +720,27 @@ impl DAPAccess for DAPLink {
 
     fn into_probe(self: Box<Self>) -> Box<dyn DebugProbe> {
         self
+    }
+
+    fn swj_sequence(&mut self, bit_len: u8, bits: u64) -> Result<(), DebugProbeError> {
+        let data = bits.to_le_bytes();
+
+        self.send_swj_sequences(SequenceRequest::new(&data[..bit_len as usize])?)?;
+
+        Ok(())
+    }
+
+    fn swj_pins(
+        &mut self,
+        pin_out: u32,
+        pin_select: u32,
+        pin_wait: u32,
+    ) -> Result<u32, DebugProbeError> {
+        let request = SWJPinsRequest::from_raw_values(pin_out as u8, pin_select as u8, pin_wait);
+
+        let Pins(response) = commands::send_command(&mut self.device, request)?;
+
+        Ok(response as u32)
     }
 }
 

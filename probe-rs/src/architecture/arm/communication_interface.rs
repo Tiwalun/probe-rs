@@ -128,6 +128,29 @@ pub trait DAPAccess: DebugProbe + AsRef<dyn DebugProbe> + AsMut<dyn DebugProbe> 
         Ok(())
     }
 
+    /// Send a specific output sequence over JTAG or SWD.
+    ///
+    /// This can only be used for output, and should be used to generate
+    /// the initial reset sequence, for example.
+    fn swj_sequence(&mut self, bit_len: u8, bits: u64) -> Result<(), DebugProbeError>;
+
+    /// Set the state of debugger output pins directly.
+    ///
+    /// The bits have the following meaning:
+    ///
+    /// Bit 0: SWCLK/TCK
+    /// Bit 1: SWDIO/TMS
+    /// Bit 2: TDI
+    /// Bit 3: TDO
+    /// Bit 5: nTRST
+    /// Bit 7: nRESET
+    fn swj_pins(
+        &mut self,
+        pin_out: u32,
+        pin_select: u32,
+        pin_wait: u32,
+    ) -> Result<u32, DebugProbeError>;
+
     fn into_probe(self: Box<Self>) -> Box<dyn DebugProbe>;
 }
 
@@ -143,7 +166,7 @@ pub trait ArmProbeInterface:
     fn read_from_rom_table(&mut self) -> Result<Option<ArmChipInfo>, ProbeRsError>;
 
     /// Corresponds to the DAP_SWJ_Sequence function from the ARM Debug sequences
-    fn swj_sequence(&mut self, bit_len: usize, bits: u64) -> Result<(), ProbeRsError>;
+    fn swj_sequence(&mut self, bit_len: u8, bits: u64) -> Result<(), ProbeRsError>;
 
     /// Corresponds to the DAP_SWJ_Pins function from the ARM Debug sequences
     fn swj_pins(
@@ -241,8 +264,10 @@ impl ArmProbeInterface for ArmCommunicationInterface {
         self.state.ap_information.len()
     }
 
-    fn swj_sequence(&mut self, bit_len: usize, bits: u64) -> Result<(), ProbeRsError> {
-        todo!()
+    fn swj_sequence(&mut self, bit_len: u8, bits: u64) -> Result<(), ProbeRsError> {
+        self.probe.swj_sequence(bit_len, bits)?;
+
+        Ok(())
     }
 
     fn swj_pins(
@@ -251,7 +276,9 @@ impl ArmProbeInterface for ArmCommunicationInterface {
         pin_select: u32,
         pin_wait: u32,
     ) -> Result<u32, ProbeRsError> {
-        todo!()
+        let value = self.probe.swj_pins(pin_out, pin_select, pin_wait)?;
+
+        Ok(value)
     }
 
     fn close(self: Box<Self>) -> Probe {

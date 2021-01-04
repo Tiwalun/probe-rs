@@ -1116,6 +1116,83 @@ impl DAPAccess for JLink {
     fn into_probe(self: Box<Self>) -> Box<dyn DebugProbe> {
         self
     }
+
+    fn swj_sequence(&mut self, bit_len: u8, bits: u64) -> Result<(), DebugProbeError> {
+        let mut bit_vector = Vec::with_capacity(bit_len as usize);
+
+        let mut bits = bits;
+
+        for _ in 0..bit_len {
+            bit_vector.push(bits & 1 == 1);
+
+            bits >>= 1;
+        }
+
+        let direction_bits = iter::repeat(true).take(bit_len as usize);
+
+        self.handle.swd_io(direction_bits, bit_vector.into_iter())?;
+
+        Ok(())
+    }
+
+    fn swj_pins(
+        &mut self,
+        pin_out: u32,
+        pin_select: u32,
+        _pin_wait: u32,
+    ) -> Result<u32, DebugProbeError> {
+        /*
+        Bit 0: SWCLK/TCK
+        Bit 1: SWDIO/TMS
+        Bit 2: TDI
+        Bit 3: TDO
+        Bit 5: nTRST
+        Bit 7: nRESET
+        */
+
+        if pin_select & (1 << 0) != 0 {
+            // set SWCLK/TCK
+
+            // This seems not possible on JLINK
+
+            log::warn!("Unable to control SWCLK/TCK pin on JLink");
+        }
+
+        if pin_select & (1 << 1) != 0 {
+            // set SWDIO/TMS
+
+            self.handle.set_tms(pin_out & (1 << 1) != 0)?;
+        }
+
+        if pin_select & (1 << 2) != 0 {
+            // set TDI
+
+            self.handle.set_tdi(pin_out & (1 << 2) != 0)?;
+        }
+
+        if pin_select & (1 << 3) != 0 {
+            // set TDO
+
+            // This seems not possible on JLINK
+
+            log::warn!("Unable to control TDO pin on JLink");
+        }
+
+        if pin_select & (1 << 5) != 0 {
+            // set nTRST
+
+            self.handle.set_trst(pin_out & (1 << 5) != 0)?;
+        }
+
+        if pin_select & (1 << 7) != 0 {
+            // set nRESET
+
+            self.handle.set_reset(pin_out & (1 << 7) != 0)?;
+        }
+
+        // We cannot read back the value of these pins
+        Ok(0xffff_ffff)
+    }
 }
 
 impl SwoAccess for JLink {
