@@ -17,6 +17,8 @@ use anyhow::anyhow;
 use jep106::JEP106Code;
 use thiserror::Error;
 
+use std::{fmt::Debug, time::Duration};
+
 #[derive(Debug, Error)]
 pub enum DapError {
     #[error("An error occured in the SWD communication between DAPlink and device.")]
@@ -63,11 +65,6 @@ impl From<PortType> for u16 {
         }
     }
 }
-use std::{
-    fmt::Debug,
-    thread,
-    time::{Duration, Instant},
-};
 
 pub trait Register: Clone + From<u32> + Into<u32> + Sized + Debug {
     const ADDRESS: u8;
@@ -366,8 +363,6 @@ impl<'interface> ArmCommunicationInterface {
         let dp_id: DebugPortId = dp_id.into();
         log::debug!("DebugPort ID:  {:#x?}", dp_id);
 
-        /*
-
         // Clear all existing sticky errors.
         let mut abort_reg = Abort(0);
         abort_reg.set_orunerrclr(true);
@@ -397,14 +392,16 @@ impl<'interface> ArmCommunicationInterface {
             return Err(DapError::TargetPowerUpFailed.into());
         }
 
-        */
-
-        debug_port_start(self)?;
+        // debug_port_start(self)?;
 
         Ok(())
     }
 
-    fn select_ap_and_ap_bank(&mut self, port: u8, ap_bank: u8) -> Result<(), DebugProbeError> {
+    pub(crate) fn select_ap_and_ap_bank(
+        &mut self,
+        port: u8,
+        ap_bank: u8,
+    ) -> Result<(), DebugProbeError> {
         let mut cache_changed = if self.state.current_apsel != port {
             self.state.current_apsel = port;
             true
@@ -863,107 +860,7 @@ impl std::fmt::Display for ArmChipInfo {
     }
 }
 
-fn debug_port_start(interface: &mut ArmCommunicationInterface) -> Result<(), DebugProbeError> {
-    log::info!("debug_port_start");
-
-    interface.write_dp_register(Select(0))?;
-
-    //let powered_down = interface.read_dp_register::<Select>::()
-
-    let ctrl = interface.read_dp_register::<Ctrl>()?;
-
-    let powered_down = !(ctrl.csyspwrupack() && ctrl.cdbgpwrupack());
-
-    if powered_down {
-        let mut ctrl = Ctrl(0);
-        ctrl.set_cdbgpwrupreq(true);
-        ctrl.set_csyspwrupreq(true);
-
-        interface.write_dp_register(ctrl)?;
-
-        let start = Instant::now();
-
-        let mut timeout = true;
-
-        while start.elapsed() < Duration::from_micros(100_0000) {
-            let ctrl = interface.read_dp_register::<Ctrl>()?;
-
-            if ctrl.csyspwrupack() && ctrl.cdbgpwrupack() {
-                timeout = false;
-                break;
-            }
-        }
-
-        if timeout {
-            return Err(DebugProbeError::Timeout);
-        }
-
-        // TODO: Handle JTAG Specific part
-
-        // TODO: Only run the following code when the SWD protocol is used
-
-        // Init AP Transfer Mode, Transaction Counter, and Lane Mask (Normal Transfer Mode, Include all Byte Lanes)
-        let mut ctrl = Ctrl(0);
-
-        ctrl.set_cdbgpwrupreq(true);
-        ctrl.set_csyspwrupreq(true);
-
-        ctrl.set_mask_lane(0b1111);
-
-        interface.write_dp_register(ctrl)?;
-
-        let mut abort = Abort(0);
-
-        abort.set_orunerrclr(true);
-        abort.set_wderrclr(true);
-        abort.set_stkerrclr(true);
-        abort.set_stkcmpclr(true);
-
-        interface.write_dp_register(abort)?;
-
-        enable_debug_mailbox(interface)?;
-    }
-
-    Ok(())
-}
-
-pub(crate) fn enable_debug_mailbox(
-    interface: &mut ArmCommunicationInterface,
-) -> Result<(), DebugProbeError> {
-    log::info!("LPC55xx connect srcipt start");
-
-    let status = interface.read_ap_register(2, IDR::default())?;
-
-    //let status = read_ap(interface, 2, 0xFC)?;
-
-    log::info!("APIDR: {:?}", status);
-    log::info!("APIDR: 0x{:08X}", u32::from(status));
-
-    let status: u32 = interface.read_dp_register::<DPIDR>()?.into();
-
-    log::info!("DPIDR: 0x{:08X}", status);
-
-    // Active DebugMailbox
-    write_ap(interface, 2, 0x0, 0x0000_0021)?;
-
-    // DAP_Delay(30000)
-    thread::sleep(Duration::from_micros(30000));
-
-    let _ = read_ap(interface, 2, 0)?;
-
-    // Enter Debug session
-    write_ap(interface, 2, 0x4, 0x0000_0007)?;
-
-    // DAP_Delay(30000)
-    thread::sleep(Duration::from_micros(30000));
-
-    let _ = read_ap(interface, 2, 8)?;
-
-    log::info!("LPC55xx connect srcipt end");
-    Ok(())
-}
-
-fn read_ap(
+pub(crate) fn read_ap(
     interface: &mut ArmCommunicationInterface,
     port: u8,
     register: u16,
@@ -984,7 +881,7 @@ fn read_ap(
     Ok(result)
 }
 
-fn write_ap(
+pub(crate) fn write_ap(
     interface: &mut ArmCommunicationInterface,
     port: u8,
     register: u16,

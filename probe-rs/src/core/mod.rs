@@ -255,6 +255,16 @@ impl CoreType {
             SpecificCoreState::Riscv => CoreType::Riscv,
         }
     }
+    pub(crate) fn architecture(&self) -> Architecture {
+        match self {
+            CoreType::M0 => Architecture::Arm,
+            CoreType::M3 => Architecture::Arm,
+            CoreType::M33 => Architecture::Arm,
+            CoreType::M4 => Architecture::Arm,
+            CoreType::M7 => Architecture::Arm,
+            CoreType::Riscv => Architecture::Riscv,
+        }
+    }
 }
 
 #[derive(Debug)]

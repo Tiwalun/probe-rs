@@ -4,7 +4,7 @@ use super::chip::Chip;
 use super::flash_algorithm::RawFlashAlgorithm;
 use super::memory::MemoryRegion;
 use crate::{
-    architecture::arm::ArmCommunicationInterface,
+    architecture::arm::{sequences::DefaultArmSequence, ArmCommunicationInterface},
     core::{Architecture, CoreType},
     DebugProbeError, Error, Memory,
 };
@@ -20,7 +20,8 @@ pub struct Target {
     pub core_type: CoreType,
     /// The memory map of the target.
     pub memory_map: Vec<MemoryRegion>,
-    pub debug_sequence: Arc<DebugSequence>,
+
+    debug_sequence: Arc<DebugSequence>,
 }
 
 impl std::fmt::Debug for Target {
@@ -47,6 +48,11 @@ impl Target {
         flash_algorithms: Vec<RawFlashAlgorithm>,
         core_type: CoreType,
     ) -> Target {
+        let debug_sequence = match core_type.architecture() {
+            Architecture::Arm => DebugSequence::Arm(Box::new(DefaultArmSequence {})),
+            Architecture::Riscv => DebugSequence::Riscv,
+        };
+
         Target {
             name: chip.name.clone().into_owned(),
             flash_algorithms,
@@ -58,14 +64,7 @@ impl Target {
 
     /// Get the architectre of the target
     pub fn architecture(&self) -> Architecture {
-        match &self.core_type {
-            CoreType::M0 => Architecture::Arm,
-            CoreType::M3 => Architecture::Arm,
-            CoreType::M33 => Architecture::Arm,
-            CoreType::M4 => Architecture::Arm,
-            CoreType::M7 => Architecture::Arm,
-            CoreType::Riscv => Architecture::Riscv,
-        }
+        self.core_type.architecture()
     }
 }
 
