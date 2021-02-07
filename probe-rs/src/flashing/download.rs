@@ -1,9 +1,14 @@
 use ihex::Record::*;
+use object::{
+    elf::FileHeader32, read::elf::FileHeader, read::elf::ProgramHeader, Bytes, Endianness, Object,
+    ObjectSection,
+};
 
 use std::{
     fs::File,
     io::{Read, Seek, SeekFrom},
     path::Path,
+    str::FromStr,
 };
 
 use super::*;
@@ -12,7 +17,7 @@ use crate::{config::MemoryRange, session::Session};
 use thiserror::Error;
 
 /// Extended options for flashing a binary file.
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct BinOptions {
     /// The address in memory where the binary will be put at.
     pub base_address: Option<u32>,
@@ -21,7 +26,7 @@ pub struct BinOptions {
 }
 
 /// A finite list of all the available binary formats probe-rs understands.
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub enum Format {
     /// Marks a file in binary format. This means that the file contains the contents of the flash 1:1.
     /// [BinOptions] can be used to define the location in flash where the file contents should be put at.
@@ -31,6 +36,22 @@ pub enum Format {
     Hex,
     /// Marks a file in the [ELF](https://en.wikipedia.org/wiki/Executable_and_Linkable_Format) format.
     Elf,
+}
+
+impl FromStr for Format {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match &s.to_lowercase()[..] {
+            "bin" | "binary" => Ok(Format::Bin(BinOptions {
+                base_address: None,
+                skip: 0,
+            })),
+            "hex" | "ihex" | "intelhex" => Ok(Format::Hex),
+            "elf" => Ok(Format::Elf),
+            _ => Err(format!("Format '{}' is unknown.", s)),
+        }
+    }
 }
 
 /// A finite list of all the errors that can occur when flashing a given file.
@@ -55,7 +76,7 @@ pub enum FileDownloadError {
     Object(&'static str),
     /// Reading and decoding the given ELF file has resulted in the given error.
     #[error("Could not read ELF file")]
-    Elf(#[from] goblin::error::Error),
+    Elf(#[from] object::read::Error),
     /// No loadable segments were found in the ELF file.
     ///
     /// This is most likely because of a bad linker script.
@@ -75,6 +96,10 @@ pub struct DownloadOptions<'progress> {
     /// instead of the full sector, the excessively erased bytes wont match the contents before the erase which might not be intuitive
     /// to the user or even worse, result in unexpected behavior if those contents contain important data.
     pub keep_unwritten_bytes: bool,
+    /// If this flag is set to true, probe-rs will try to use the chips built in method to do a full chip erase if one is available.
+    /// This is often faster than erasing a lot of single sectors.
+    /// So if you do not need the old contents of the flash, this is a good option.
+    pub do_chip_erase: bool,
 }
 
 /// Downloads a file of given `format` at `path` to the flash of the target given in `session`.
@@ -108,7 +133,7 @@ pub fn download_file_with_options(
     let mut buffer = vec![];
     let mut buffer_vec = vec![];
     // IMPORTANT: Change this to an actual memory map of a real chip
-    let memory_map = session.memory_map().to_vec();
+    let memory_map = session.target().memory_map.clone();
     let mut loader = FlashLoader::new(&memory_map, options.keep_unwritten_bytes);
 
     match format {
@@ -122,7 +147,7 @@ pub fn download_file_with_options(
         .commit(
             session,
             options.progress.unwrap_or(&FlashProgress::new(|_| {})),
-            false,
+            options.do_chip_erase,
         )
         .map_err(FileDownloadError::Flash)
 }
@@ -195,37 +220,71 @@ fn download_elf<'buffer, T: Read + Seek>(
     file: &'buffer mut T,
     loader: &mut FlashLoader<'_, 'buffer>,
 ) -> Result<(), FileDownloadError> {
-    use goblin::elf::program_header::*;
-
     file.read_to_end(buffer)?;
 
-    let binary = goblin::elf::Elf::parse(&buffer.as_slice())?;
+    let file_kind = object::FileKind::parse(buffer)?;
+
+    match file_kind {
+        object::FileKind::Elf32 => (),
+        _ => return Err(FileDownloadError::Object("Unsupported file type")),
+    }
+
+    let elf_header = FileHeader32::<Endianness>::parse(Bytes(buffer))?;
+
+    let binary = object::read::elf::ElfFile::<FileHeader32<Endianness>>::parse(buffer)?;
+
+    let endian = elf_header.endian()?;
+
     let mut added_sections = vec![];
-    for ph in &binary.program_headers {
-        if ph.p_type == PT_LOAD && ph.p_filesz > 0 {
-            log::debug!("Found loadable segment.");
+
+    for segment in elf_header.program_headers(elf_header.endian()?, Bytes(buffer))? {
+        // Get the physical address of the segment. The data will be programmed to that location.
+        let p_paddr: u64 = segment.p_paddr(endian).into();
+
+        let segment_data = segment
+            .data(endian, Bytes(buffer))
+            .map_err(|_| FileDownloadError::Object("Failed to access data for an ELF segment."))?;
+
+        if !segment_data.is_empty() {
+            log::info!("Found loadable segment, address: {:#010x}", p_paddr);
+
+            let (segment_offset, segment_filesize) = segment.file_range(endian);
 
             let sector: core::ops::Range<u32> =
-                ph.p_offset as u32..ph.p_offset as u32 + ph.p_filesz as u32;
+                segment_offset as u32..segment_offset as u32 + segment_filesize as u32;
 
-            for sh in &binary.section_headers {
-                if sector
-                    .contains_range(&(sh.sh_offset as u32..sh.sh_offset as u32 + sh.sh_size as u32))
-                {
+            for section in binary.sections() {
+                let (section_offset, section_filesize) = match section.file_range() {
+                    Some(range) => range,
+                    None => continue,
+                };
+
+                if sector.contains_range(
+                    &(section_offset as u32..section_offset as u32 + section_filesize as u32),
+                ) {
+                    log::info!("Matching section: {:?}", section.name()?);
+
                     #[cfg(feature = "hexdump")]
-                    for line in hexdump::hexdump_iter(
-                        &buffer[sh.sh_offset as usize..][..sh.sh_size as usize],
-                    ) {
+                    for line in hexdump::hexdump_iter(section.data()?) {
                         log::trace!("{}", line);
                     }
 
-                    added_sections.push((&binary.shdr_strtab[sh.sh_name], sh.sh_addr, sh.sh_size));
+                    for (offset, relocation) in section.relocations() {
+                        log::info!("Relocation: offset={}, relocation={:?}", offset, relocation);
+                    }
+
+                    added_sections.push((
+                        section.name()?.to_owned(),
+                        section.address(),
+                        section.size(),
+                    ));
                 }
             }
 
             loader.add_data(
-                ph.p_paddr as u32,
-                &buffer[ph.p_offset as usize..][..ph.p_filesz as usize],
+                p_paddr as u32,
+                &buffer
+                    [segment_offset as usize..segment_offset as usize + segment_filesize as usize],
             )?;
         }
     }
@@ -244,5 +303,67 @@ fn download_elf<'buffer, T: Read + Seek>(
             );
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use super::{BinOptions, Format};
+
+    #[test]
+    fn parse_format() {
+        assert_eq!(Format::from_str("hex"), Ok(Format::Hex));
+        assert_eq!(Format::from_str("Hex"), Ok(Format::Hex));
+        assert_eq!(Format::from_str("Ihex"), Ok(Format::Hex));
+        assert_eq!(Format::from_str("IHex"), Ok(Format::Hex));
+        assert_eq!(Format::from_str("iHex"), Ok(Format::Hex));
+        assert_eq!(Format::from_str("IntelHex"), Ok(Format::Hex));
+        assert_eq!(Format::from_str("intelhex"), Ok(Format::Hex));
+        assert_eq!(Format::from_str("intelHex"), Ok(Format::Hex));
+        assert_eq!(Format::from_str("Intelhex"), Ok(Format::Hex));
+        assert_eq!(
+            Format::from_str("bin"),
+            Ok(Format::Bin(BinOptions {
+                base_address: None,
+                skip: 0
+            }))
+        );
+        assert_eq!(
+            Format::from_str("Bin"),
+            Ok(Format::Bin(BinOptions {
+                base_address: None,
+                skip: 0
+            }))
+        );
+        assert_eq!(
+            Format::from_str("binary"),
+            Ok(Format::Bin(BinOptions {
+                base_address: None,
+                skip: 0
+            }))
+        );
+        assert_eq!(
+            Format::from_str("Binary"),
+            Ok(Format::Bin(BinOptions {
+                base_address: None,
+                skip: 0
+            }))
+        );
+        assert_eq!(Format::from_str("Elf"), Ok(Format::Elf));
+        assert_eq!(Format::from_str("elf"), Ok(Format::Elf));
+        assert_eq!(
+            Format::from_str("elfbin"),
+            Err("Format 'elfbin' is unknown.".to_string())
+        );
+        assert_eq!(
+            Format::from_str(""),
+            Err("Format '' is unknown.".to_string())
+        );
+        assert_eq!(
+            Format::from_str("asdasdf"),
+            Err("Format 'asdasdf' is unknown.".to_string())
+        );
     }
 }

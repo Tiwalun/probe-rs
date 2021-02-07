@@ -340,7 +340,7 @@ impl CoreRegister for Dfsr {
 }
 
 #[derive(Debug)]
-pub(crate) struct CortexState {
+pub struct CortexState {
     initialized: bool,
 
     hw_breakpoints_enabled: bool,
