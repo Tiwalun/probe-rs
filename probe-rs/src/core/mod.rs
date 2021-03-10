@@ -2,8 +2,8 @@ pub(crate) mod communication_interface;
 
 pub use communication_interface::CommunicationInterface;
 
-use crate::error;
 use crate::DebugProbeError;
+use crate::{architecture::arm::communication_interface::Initialized, error};
 use crate::{
     architecture::{
         arm::core::CortexState, riscv::communication_interface::RiscvCommunicationInterface,
@@ -217,7 +217,7 @@ impl<'probe> MemoryInterface for Core<'probe> {
 
     fn get_arm_interface(
         &mut self,
-    ) -> Result<&mut crate::architecture::arm::ArmCommunicationInterface, Error> {
+    ) -> Result<&mut crate::architecture::arm::ArmCommunicationInterface<Initialized>, Error> {
         todo!()
     }
 }

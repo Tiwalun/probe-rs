@@ -4,9 +4,11 @@ use super::chip::Chip;
 use super::flash_algorithm::RawFlashAlgorithm;
 use super::memory::MemoryRegion;
 use crate::{
-    architecture::arm::{sequences::DefaultArmSequence, ArmCommunicationInterface},
+    architecture::arm::{
+        communication_interface::UninitializedArmProbe, sequences::DefaultArmSequence,
+    },
     core::{Architecture, CoreType},
-    DebugProbeError, Error, Memory,
+    Error, Memory,
 };
 
 /// This describes a complete target with a fixed chip model and variant.
@@ -21,7 +23,7 @@ pub struct Target {
     /// The memory map of the target.
     pub memory_map: Vec<MemoryRegion>,
 
-    debug_sequence: Arc<DebugSequence>,
+    pub debug_sequence: Arc<DebugSequence>,
 }
 
 impl std::fmt::Debug for Target {
@@ -58,7 +60,7 @@ impl Target {
             flash_algorithms,
             core_type,
             memory_map: chip.memory_map.clone().into_owned(),
-            debug_sequence: Arc::new(DebugSequence::Riscv),
+            debug_sequence: Arc::new(debug_sequence),
         }
     }
 
@@ -122,7 +124,8 @@ pub trait ArmDebugSequence: Send + Sync {
     fn reset_hardware_assert(&self, interface: &mut Memory) -> Result<(), Error>;
     fn reset_hardware_deassert(&self, interface: &mut Memory) -> Result<(), Error>;
 
-    fn debug_port_setup(&self, interface: &mut Memory) -> Result<(), Error>;
+    fn debug_port_setup(&self, interface: &mut Box<dyn UninitializedArmProbe>)
+        -> Result<(), Error>;
 
     fn debug_port_start(&self, interface: &mut Memory) -> Result<(), Error>;
 

@@ -39,7 +39,7 @@ pub use memory::{
     MemoryRange, MemoryRegion, NvmRegion, PageInfo, RamRegion, SectorDescription, SectorInfo,
 };
 pub use registry::{add_target_from_yaml, families, get_target_by_name, RegistryError};
-pub use target::{ArmDebugSequence, Target, TargetParseError, TargetSelector};
+pub use target::{ArmDebugSequence, DebugSequence, Target, TargetParseError, TargetSelector};
 
 // Crate-internal API
 pub(crate) use chip_info::ChipInfo;

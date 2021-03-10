@@ -1,7 +1,10 @@
 use super::super::ap::{
     APAccess, APRegister, AccessPortError, AddressIncrement, DataSize, MemoryAP, CSW, DRW, TAR,
 };
-use crate::architecture::arm::{dp::DPAccess, ArmCommunicationInterface, MemoryApInformation};
+use crate::architecture::arm::{
+    communication_interface::Initialized, dp::DPAccess, ArmCommunicationInterface,
+    MemoryApInformation,
+};
 use crate::{CommunicationInterface, CoreRegister, CoreRegisterAddress, DebugProbeError, Error};
 use scroll::{Pread, Pwrite, LE};
 use std::convert::TryInto;
@@ -29,7 +32,9 @@ pub trait ArmProbe {
 
     fn flush(&mut self) -> Result<(), Error>;
 
-    fn get_arm_communication_interface(&mut self) -> Result<&mut ArmCommunicationInterface, Error>;
+    fn get_arm_communication_interface(
+        &mut self,
+    ) -> Result<&mut ArmCommunicationInterface<Initialized>, Error>;
 }
 
 /// A struct to give access to a targets memory using a certain DAP.
@@ -57,12 +62,15 @@ where
     cached_csw_value: Option<CSW>,
 }
 
-impl<'interface> ADIMemoryInterface<'interface, ArmCommunicationInterface> {
+impl<'interface> ADIMemoryInterface<'interface, ArmCommunicationInterface<Initialized>> {
     /// Creates a new MemoryInterface for given AccessPort.
     pub fn new(
-        interface: &'interface mut ArmCommunicationInterface,
+        interface: &'interface mut ArmCommunicationInterface<Initialized>,
         ap_information: &MemoryApInformation,
-    ) -> Result<ADIMemoryInterface<'interface, ArmCommunicationInterface>, AccessPortError> {
+    ) -> Result<
+        ADIMemoryInterface<'interface, ArmCommunicationInterface<Initialized>>,
+        AccessPortError,
+    > {
         Ok(Self {
             interface,
             only_32bit_data_size: ap_information.only_32bit_data_size,
@@ -605,7 +613,7 @@ where
         + DPAccess,
         */
 
-impl ArmProbe for ADIMemoryInterface<'_, ArmCommunicationInterface> {
+impl ArmProbe for ADIMemoryInterface<'_, ArmCommunicationInterface<Initialized>> {
     fn read_core_reg(&mut self, ap: MemoryAP, addr: CoreRegisterAddress) -> Result<u32, Error> {
         // Write the DCRSR value to select the register we want to read.
         let mut dcrsr_val = Dcrsr(0);
@@ -687,7 +695,9 @@ impl ArmProbe for ADIMemoryInterface<'_, ArmCommunicationInterface> {
         Ok(())
     }
 
-    fn get_arm_communication_interface(&mut self) -> Result<&mut ArmCommunicationInterface, Error> {
+    fn get_arm_communication_interface(
+        &mut self,
+    ) -> Result<&mut ArmCommunicationInterface<Initialized>, Error> {
         Ok(self.interface)
     }
 }

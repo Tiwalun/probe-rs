@@ -809,8 +809,21 @@ impl<Probe: RawSwdIo + 'static> DAPAccess for Probe {
         todo!()
     }
 
-    fn swj_sequence(&mut self, bit_len: u8, bits: u64) -> Result<(), DebugProbeError> {
-        todo!()
+    fn swj_sequence(&mut self, bit_len: u8, mut bits: u64) -> Result<(), DebugProbeError> {
+        let mut io_sequence = IoSequence::new();
+
+        for _ in 0..bit_len {
+            io_sequence.add_output(bits & 1 == 1);
+
+            bits >>= 1;
+        }
+
+        self.swd_io(
+            io_sequence.direction_bits().to_owned(),
+            io_sequence.io_bits().to_owned(),
+        )?;
+
+        Ok(())
     }
 }
 

@@ -4,6 +4,7 @@ mod usb_interface;
 
 use self::usb_interface::{STLinkUSBDevice, StLinkUsb};
 use super::{DAPAccess, DebugProbe, DebugProbeError, PortType, ProbeCreationError, WireProtocol};
+use crate::architecture::arm::{dp::DPIDR, Register};
 use crate::{
     architecture::arm::communication_interface::MemoryApInformation,
     architecture::arm::{
@@ -11,7 +12,10 @@ use crate::{
             valid_access_ports, APAccess, APClass, APRegister, AccessPort, BaseaddrFormat,
             GenericAP, MemoryAP, BASE, BASE2, CSW, IDR,
         },
-        communication_interface::{ArmCommunicationInterfaceState, ArmProbeInterface},
+        communication_interface::{
+            ArmCommunicationInterfaceState, ArmProbeInterface, Initialized, SwdSequence,
+            UninitializedArmProbe,
+        },
         dp::{DPAccess, DPBankSel, DPRegister, DebugPortError, Select},
         memory::{adi_v5_memory_interface::ArmProbe, Component},
         ApInformation, ArmChipInfo, SwoAccess, SwoConfig, SwoMode,
@@ -266,11 +270,9 @@ impl DebugProbe for STLink<STLinkUSBDevice> {
 
     fn try_get_arm_interface<'probe>(
         self: Box<Self>,
-    ) -> Result<Box<dyn ArmProbeInterface + 'probe>, (Box<dyn DebugProbe>, DebugProbeError)> {
-        match StlinkArmDebug::new(self) {
-            Ok(interface) => Ok(Box::new(interface)),
-            Err((probe, err)) => Err((probe.into_probe(), err)),
-        }
+    ) -> Result<Box<dyn UninitializedArmProbe + 'probe>, (Box<dyn DebugProbe>, DebugProbeError)>
+    {
+        Ok(Box::new(UninitializedStLink { probe: self }))
     }
 
     fn get_target_voltage(&mut self) -> Result<Option<f32>, DebugProbeError> {
@@ -1128,6 +1130,45 @@ impl From<StlinkError> for ProbeCreationError {
     }
 }
 
+struct UninitializedStLink {
+    probe: Box<STLink<STLinkUSBDevice>>,
+}
+
+impl UninitializedArmProbe for UninitializedStLink {
+    fn initialize(self: Box<Self>) -> Result<Box<dyn ArmProbeInterface>, ProbeRsError> {
+        let interface = StlinkArmDebug::new(self.probe).map_err(|(_s, e)| ProbeRsError::from(e))?;
+
+        Ok(Box::new(interface))
+    }
+}
+
+impl SwdSequence for UninitializedStLink {
+    fn swj_sequence(&mut self, _bit_len: u8, _bits: u64) -> Result<(), ProbeRsError> {
+        // This is not supported for ST-Links, unfortunately.
+        Err(DebugProbeError::CommandNotSupportedByProbe.into())
+    }
+
+    fn swj_pins(
+        &mut self,
+        _pin_out: u32,
+        _pin_select: u32,
+        _pin_wait: u32,
+    ) -> Result<u32, ProbeRsError> {
+        // This is not supported for ST-Links, unfortunately.
+        Err(DebugProbeError::CommandNotSupportedByProbe.into())
+    }
+
+    // Todo: Is this possible with an uninitialized ST Link?
+    fn read_dpidr(&mut self) -> Result<u32, ProbeRsError> {
+        let result = self
+            .probe
+            .read_register(PortType::DebugPort, DPIDR::ADDRESS as u16)
+            .map_err(|e| ProbeRsError::Other(e.into()))?;
+
+        Ok(result.into())
+    }
+}
+
 #[derive(Debug)]
 struct StlinkArmDebug {
     probe: Box<STLink<STLinkUSBDevice>>,
@@ -1383,7 +1424,9 @@ impl<'probe> ArmProbeInterface for StlinkArmDebug {
     fn close(self: Box<Self>) -> Probe {
         Probe::from_attached_probe(self.probe)
     }
+}
 
+impl SwdSequence for StlinkArmDebug {
     fn swj_sequence(&mut self, _bit_len: u8, _bits: u64) -> Result<(), ProbeRsError> {
         // This is not supported for ST-Links, unfortunately.
         Err(DebugProbeError::CommandNotSupportedByProbe.into())
@@ -1397,6 +1440,14 @@ impl<'probe> ArmProbeInterface for StlinkArmDebug {
     ) -> Result<u32, ProbeRsError> {
         // This is not supported for ST-Links, unfortunately.
         Err(DebugProbeError::CommandNotSupportedByProbe.into())
+    }
+
+    fn read_dpidr(&mut self) -> Result<u32, ProbeRsError> {
+        let result = self
+            .read_dp_register::<DPIDR>()
+            .map_err(|e| ProbeRsError::Other(e.into()))?;
+
+        Ok(result.into())
     }
 }
 
@@ -1703,7 +1754,8 @@ impl ArmProbe for StLinkMemoryInterface<'_> {
 
     fn get_arm_communication_interface(
         &mut self,
-    ) -> Result<&mut crate::architecture::arm::ArmCommunicationInterface, ProbeRsError> {
+    ) -> Result<&mut crate::architecture::arm::ArmCommunicationInterface<Initialized>, ProbeRsError>
+    {
         todo!()
     }
 }

@@ -5,7 +5,7 @@ pub(crate) mod jlink;
 pub(crate) mod stlink;
 
 use crate::architecture::{
-    arm::{communication_interface::ArmProbeInterface, DAPAccess, PortType, SwoAccess},
+    arm::{communication_interface::UninitializedArmProbe, DAPAccess, PortType, SwoAccess},
     riscv::communication_interface::RiscvCommunicationInterface,
 };
 use crate::config::{RegistryError, TargetSelector};
@@ -370,7 +370,7 @@ impl Probe {
     /// If an error occurs while trying to connect, the probe is returned.
     pub fn try_into_arm_interface<'probe>(
         self,
-    ) -> Result<Box<dyn ArmProbeInterface + 'probe>, (Self, DebugProbeError)> {
+    ) -> Result<Box<dyn UninitializedArmProbe + 'probe>, (Self, DebugProbeError)> {
         if !self.attached {
             Err((self, DebugProbeError::NotAttached))
         } else {
@@ -473,7 +473,8 @@ pub trait DebugProbe: Send + fmt::Debug {
     /// probe actually supports this, call [DebugProbe::has_arm_interface] first.
     fn try_get_arm_interface<'probe>(
         self: Box<Self>,
-    ) -> Result<Box<dyn ArmProbeInterface + 'probe>, (Box<dyn DebugProbe>, DebugProbeError)> {
+    ) -> Result<Box<dyn UninitializedArmProbe + 'probe>, (Box<dyn DebugProbe>, DebugProbeError)>
+    {
         Err((
             self.into_probe(),
             DebugProbeError::InterfaceNotAvailable("ARM"),
@@ -710,7 +711,8 @@ impl DebugProbe for FakeProbe {
 
     fn try_get_arm_interface<'probe>(
         self: Box<Self>,
-    ) -> Result<Box<dyn ArmProbeInterface + 'probe>, (Box<dyn DebugProbe>, DebugProbeError)> {
+    ) -> Result<Box<dyn UninitializedArmProbe + 'probe>, (Box<dyn DebugProbe>, DebugProbeError)>
+    {
         todo!()
     }
 }

@@ -3,7 +3,7 @@ pub mod tools;
 
 use crate::{
     architecture::arm::{
-        communication_interface::{ArmProbeInterface, DAPProbe},
+        communication_interface::{ArmProbeInterface, DAPProbe, UninitializedArmProbe},
         dp::{Abort, Ctrl, DPAccess, DPRegister, DebugPortError},
         swo::poll_interval_from_buf_size,
         ArmCommunicationInterface, DAPAccess, DapError, PortType, Register, SwoAccess, SwoConfig,
@@ -485,6 +485,8 @@ impl DebugProbe for DAPLink {
 
         // The following sequence is the DebugPortSetup sequence from the ARM debug sequences
 
+        /*
+
         // SWJ-DP defaults to JTAG operation on powerup reset
         // Switching from JTAG to SWD operation
 
@@ -507,6 +509,8 @@ impl DebugProbe for DAPLink {
         // On selecting SWD operation, the SWD interface returns to its reset state.
 
         debug!("Successfully changed to SWD.");
+
+        */
 
         // Tell the probe we are connected so it can turn on an LED.
         let _: Result<HostStatusResponse, _> =
@@ -587,11 +591,9 @@ impl DebugProbe for DAPLink {
 
     fn try_get_arm_interface<'probe>(
         self: Box<Self>,
-    ) -> Result<Box<dyn ArmProbeInterface + 'probe>, (Box<dyn DebugProbe>, DebugProbeError)> {
-        match ArmCommunicationInterface::new(self, false) {
-            Ok(interface) => Ok(Box::new(interface)),
-            Err((probe, error)) => Err((probe.into_probe(), error)),
-        }
+    ) -> Result<Box<dyn UninitializedArmProbe + 'probe>, (Box<dyn DebugProbe>, DebugProbeError)>
+    {
+        Ok(Box::new(ArmCommunicationInterface::new(self, false)))
     }
 
     fn has_arm_interface(&self) -> bool {
@@ -714,7 +716,7 @@ impl DAPAccess for DAPLink {
     fn swj_sequence(&mut self, bit_len: u8, bits: u64) -> Result<(), DebugProbeError> {
         let data = bits.to_le_bytes();
 
-        self.send_swj_sequences(SequenceRequest::new(&data[..bit_len as usize])?)?;
+        self.send_swj_sequences(SequenceRequest::new(&data, bit_len)?)?;
 
         Ok(())
     }

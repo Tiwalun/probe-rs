@@ -1,24 +1,31 @@
 #![warn(missing_docs)]
 
-use crate::architecture::{
-    arm::{
-        communication_interface::{
-            ApInformation::{MemoryAp, Other},
-            ArmProbeInterface, MemoryApInformation,
-        },
-        core::{debug_core_start, reset_catch_clear, reset_catch_set},
-        memory::Component,
-        SwoConfig,
-    },
-    riscv::communication_interface::RiscvCommunicationInterface,
-};
 use crate::config::{
     ChipInfo, MemoryRegion, RawFlashAlgorithm, RegistryError, Target, TargetSelector,
 };
 use crate::core::{Architecture, CoreState, SpecificCoreState};
+use crate::{
+    architecture::{
+        arm::{
+            ap::MemoryAP,
+            communication_interface::{
+                ApInformation::{MemoryAp, Other},
+                ArmProbeInterface, MemoryApInformation,
+            },
+            core::{reset_catch_clear, reset_catch_set},
+            memory::Component,
+            SwoConfig,
+        },
+        riscv::communication_interface::RiscvCommunicationInterface,
+    },
+    config::DebugSequence,
+};
 use crate::{AttachMethod, Core, CoreType, Error, Probe};
 use anyhow::anyhow;
-use std::time::Duration;
+use std::{
+    borrow::{Borrow, BorrowMut},
+    time::Duration,
+};
 
 /// The `Session` struct represents an active debug session.
 ///
@@ -106,21 +113,39 @@ impl Session {
 
         let mut session = match target.architecture() {
             Architecture::Arm => {
+                let mut interface = probe.try_into_arm_interface().map_err(|(_, err)| err)?;
+
+                match target.debug_sequence.borrow() {
+                    DebugSequence::Arm(sequence) => {
+                        sequence.debug_port_setup(interface.borrow_mut())?
+                    }
+                    DebugSequence::Riscv => panic!("Should not happen...."),
+                }
+
+                let mut interface = interface.initialize()?;
+
+                {
+                    let mut memory_interface = interface.memory_interface(MemoryAP::from(0))?;
+
+                    // Enable debug mode
+                    match target.debug_sequence.borrow() {
+                        DebugSequence::Arm(sequence) => {
+                            sequence.debug_core_start(&mut memory_interface)?
+                        }
+                        DebugSequence::Riscv => panic!("Should not happen...."),
+                    }
+                }
+
                 let core = (
                     SpecificCoreState::from_core_type(target.core_type),
                     Core::create_state(0),
                 );
-
-                let interface = probe.try_into_arm_interface().map_err(|(_, err)| err)?;
 
                 let mut session = Session {
                     target,
                     interface: ArchitectureInterface::Arm(interface),
                     cores: vec![core],
                 };
-
-                // Enable debug mode
-                debug_core_start(&mut session.core(0)?)?;
 
                 if attach_method == AttachMethod::UnderReset {
                     // we need to halt the chip here
@@ -389,7 +414,9 @@ fn get_target_from_selector(
 
             if probe.has_arm_interface() {
                 match probe.try_into_arm_interface() {
-                    Ok(mut interface) => {
+                    Ok(interface) => {
+                        let mut interface = interface.initialize()?;
+
                         //let chip_result = try_arm_autodetect(interface);
                         log::debug!("Autodetect: Trying DAP interface...");
 
