@@ -1,5 +1,7 @@
 use crate::{
-    architecture::arm::{ap::MemoryAP, memory::adi_v5_memory_interface::ArmProbe},
+    architecture::arm::{
+        ap::MemoryAP, memory::adi_v5_memory_interface::ArmProbe, ArmProbeInterface,
+    },
     CoreRegisterAddress,
 };
 use crate::{

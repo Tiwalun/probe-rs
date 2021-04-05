@@ -21,6 +21,8 @@ use crate::{
     DebugProbeSelector, Error as ProbeRsError,
 };
 
+use self::swd::{SwdSettings, SwdStatistics};
+
 mod swd;
 
 const SWO_BUFFER_SIZE: u16 = 128;
@@ -43,6 +45,9 @@ pub(crate) struct JLink {
     current_ir_reg: u32,
 
     speed_khz: u32,
+
+    swd_statistics: SwdStatistics,
+    swd_settings: SwdSettings,
 }
 
 impl JLink {
@@ -54,7 +59,7 @@ impl JLink {
         &mut self,
         protocol: Option<WireProtocol>,
     ) -> Result<WireProtocol, DebugProbeError> {
-        let capabilities = self.handle.read_capabilities()?;
+        let capabilities = self.handle.capabilities();
 
         if capabilities.contains(jaylink::Capabilities::SELECT_IF) {
             if let Some(protocol) = protocol {
@@ -63,11 +68,7 @@ impl JLink {
                     WireProtocol::Jtag => jaylink::Interface::Jtag,
                 };
 
-                if self
-                    .handle
-                    .read_available_interfaces()?
-                    .any(|interface| interface == jlink_interface)
-                {
+                if self.handle.available_interfaces().contains(jlink_interface) {
                     // We can select the desired interface
                     self.handle.select_interface(jlink_interface)?;
                     Ok(protocol)
@@ -76,7 +77,7 @@ impl JLink {
                 }
             } else {
                 // No special protocol request
-                let current_protocol = self.handle.read_current_interface()?;
+                let current_protocol = self.handle.current_interface();
 
                 match current_protocol {
                     jaylink::Interface::Swd => Ok(WireProtocol::Swd),
@@ -356,12 +357,12 @@ impl DebugProbe for JLink {
         // not be able to change protocols.
 
         let supported_protocols: Vec<WireProtocol> = if jlink_handle
-            .read_capabilities()?
+            .capabilities()
             .contains(jaylink::Capabilities::SELECT_IF)
         {
-            let interfaces = jlink_handle.read_available_interfaces()?;
+            let interfaces = jlink_handle.available_interfaces();
 
-            let protocols: Vec<_> = interfaces.map(WireProtocol::try_from).collect();
+            let protocols: Vec<_> = interfaces.into_iter().map(WireProtocol::try_from).collect();
 
             protocols
                 .iter()
@@ -392,6 +393,8 @@ impl DebugProbe for JLink {
             protocol: None,
             current_ir_reg: 1,
             speed_khz: 0,
+            swd_settings: SwdSettings::default(),
+            swd_statistics: SwdStatistics::default(),
         }))
     }
 
@@ -470,7 +473,7 @@ impl DebugProbe for JLink {
         log::debug!("Attaching with protocol '{}'", actual_protocol);
 
         // Get reference to JayLink instance
-        let capabilities = self.handle.read_capabilities()?;
+        let capabilities = self.handle.capabilities();
 
         // Log some information about the probe
         let serial = self.handle.serial_string().trim_start_matches('0');

@@ -11,7 +11,8 @@ use super::{
     ARM_REGISTER_FILE,
 };
 use crate::{
-    core::{Architecture, CoreStatus, HaltReason},
+    config::Architecture,
+    core::{CoreStatus, HaltReason},
     MemoryInterface,
 };
 use anyhow::Result;

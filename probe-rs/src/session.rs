@@ -1,25 +1,20 @@
 #![warn(missing_docs)]
 
-use crate::config::{
-    ChipInfo, MemoryRegion, RawFlashAlgorithm, RegistryError, Target, TargetSelector,
-};
-use crate::core::{Architecture, CoreState, SpecificCoreState};
-use crate::{
-    architecture::{
-        arm::{
-            ap::MemoryAP,
-            communication_interface::{
-                ApInformation::{MemoryAp, Other},
-                ArmProbeInterface, MemoryApInformation,
-            },
-            core::{reset_catch_clear, reset_catch_set},
-            memory::Component,
-            SwoConfig,
+use crate::architecture::{
+    arm::{
+        communication_interface::{
+            ApInformation::{MemoryAp, Other},
+            ArmProbeInterface, MemoryApInformation,
         },
-        riscv::communication_interface::RiscvCommunicationInterface,
+        core::{reset_catch_clear, reset_catch_set},
+        memory::Component,
+        SwoConfig,
     },
-    config::DebugSequence,
+    riscv::communication_interface::RiscvCommunicationInterface,
 };
+use crate::config::{Architecture, ChipInfo, MemoryRegion, RegistryError, Target, TargetSelector};
+use crate::core::{CoreState, SpecificCoreState};
+use crate::{architecture::arm::ap::MemoryAP, config::DebugSequence};
 use crate::{AttachMethod, Core, CoreType, Error, Probe};
 use anyhow::anyhow;
 use std::{
@@ -29,20 +24,23 @@ use std::{
 
 /// The `Session` struct represents an active debug session.
 ///
-/// ## Creating a session
-///
-/// It can be conviently created by calling the [Session::auto_attach()] function,
-/// which tries to automatically select a probe, and then connect to the target.
+/// ## Creating a session  
+/// The session can be created by calling the [Session::auto_attach()] function,
+/// which tries to automatically select a probe, and then connect to the target.  
 ///
 /// For more control, the [Probe::attach()] and [Probe::attach_under_reset()]
-/// methods can be used to open a `Session` from a specific [Probe].
+/// methods can be used to open a `Session` from a specific [Probe].  
 ///
-/// # Usage
-/// To get access to a single [Core] from the `Session`, the [Session::core()] method
-/// can be used.
+/// # Usage  
+/// The Session is the common handle that gives a user exclusive access to an active probe.  
+/// You can create and share a session between threads to enable multiple stakeholders (e.g. GDB and RTT) to access the target taking turns, by using  `Arc<Mutex<Session>>.`  
 ///
-/// You can create and share a session between threads to enable multiple stakeholders (e.g. GDB and RTT) to access the target
-/// taking turns. If you do so, please make sure that both threads sleep in between tasks such that other shareholders may take their turn.
+/// If you do so, make sure that both threads sleep in between tasks such that other stakeholders may take their turn.  
+///
+/// To get access to a single [Core] from the `Session`, the [Session::core()] method can be used.
+/// Please see the [Session::core()] method for more usage guidelines.
+///
+
 #[derive(Debug)]
 pub struct Session {
     target: Target,
@@ -216,21 +214,30 @@ impl Session {
     pub fn list_cores(&self) -> Vec<(usize, CoreType)> {
         self.cores
             .iter()
-            .map(|(t, _)| CoreType::from(t))
+            .map(|(t, _)| t.core_type())
             .enumerate()
             .collect()
     }
 
     /// Attaches to the core with the given number.
+    ///
+    /// ## Usage
+    /// Everytime you want to perform an operation on the chip, you need to get the Core handle with the [Session::core() method. This [Core] handle is merely a view into the core. And provides a convenient API surface.
+    ///
+    /// All the state is stored in the [Session] handle.
+    ///
+    /// The first time you call [Session::core()] for a specific core, it will run the attach/init sequences and return a handle to the [Core].
+    ///
+    /// Every subsequent call is a no-op. It simply returns the handle for the user to use in further operations without calling any int sequences again.
+    ///
+    /// It is strongly advised to never store the [Core] handle for any significant duration! Free it as fast as possible such that other stakeholders can have access to the [Core] too.
+    ///
+    /// The idea behind this is: You need the smallest common denominator which you can share between threads. Since you sometimes need the [Core], sometimes the [Probe] or sometimes the [Target], the [Session] is the only common ground and the only handle you should actively store in your code.
+    ///
     pub fn core(&mut self, n: usize) -> Result<Core<'_>, Error> {
         let (core, core_state) = self.cores.get_mut(n).ok_or(Error::CoreNotFound(n))?;
 
         self.interface.attach(core, core_state)
-    }
-
-    /// Returns a list of the flash algotithms on the target.
-    pub(crate) fn flash_algorithms(&self) -> &[RawFlashAlgorithm] {
-        &self.target.flash_algorithms
     }
 
     /// Read available data from the SWO interface without waiting.
@@ -308,6 +315,11 @@ impl Session {
         Ok(components)
     }
 
+    /// Get the target description of the connected target.
+    pub fn target(&self) -> &Target {
+        &self.target
+    }
+
     /// Configure the target and probe for serial wire view (SWV) tracing.
     pub fn setup_swv(&mut self, config: &SwoConfig) -> Result<(), Error> {
         // Configure SWO on the probe
@@ -356,11 +368,6 @@ impl Session {
     #[deprecated = "Use the Session::target function instead"]
     pub fn memory_map(&self) -> &[MemoryRegion] {
         &self.target.memory_map
-    }
-
-    /// Get the target description of the connected target.
-    pub fn target(&self) -> &Target {
-        &self.target
     }
 
     /// Return the `Architecture` of the currently connected chip.

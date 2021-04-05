@@ -1,18 +1,16 @@
 //! Support for Cortex-M33
 //!
 
-use crate::memory::Memory;
-use crate::{architecture::arm::communication_interface::Initialized, error::Error};
 use crate::{
-    core::{
-        Architecture, CoreInformation, CoreInterface, CoreRegister, CoreRegisterAddress,
-        RegisterFile,
-    },
-    CoreStatus, DebugProbeError, HaltReason,
+    architecture::arm::{communication_interface::Initialized, core::register},
+    config::Architecture,
+    core::{CoreInformation, CoreInterface, CoreRegister, CoreRegisterAddress, RegisterFile},
+    error::Error,
+    memory::Memory,
+    CoreStatus, DebugProbeError, HaltReason, MemoryInterface,
 };
-use anyhow::Result;
 
-use crate::{architecture::arm::core::register, MemoryInterface};
+use anyhow::Result;
 
 use bitfield::bitfield;
 
@@ -199,8 +197,8 @@ impl<'probe> CoreInterface for M33<'probe> {
     fn set_breakpoint(&mut self, bp_unit_index: usize, addr: u32) -> Result<(), Error> {
         let mut val = FpCompX::from(0);
 
-        // clear bits which cannot be set
-        let comp_val = addr & 0xff_ff_ff_fe;
+        // clear bits which cannot be set and shift into position
+        let comp_val = (addr & 0xff_ff_ff_fe) >> 1;
 
         val.set_bp_addr(comp_val);
         val.set_enable(true);
@@ -536,7 +534,7 @@ impl FpCtrl {
 }
 
 impl CoreRegister for FpCtrl {
-    const ADDRESS: u32 = 0xE000_2008;
+    const ADDRESS: u32 = 0xE000_2000;
     const NAME: &'static str = "FP_CTRL";
 }
 
@@ -562,8 +560,8 @@ bitfield! {
 }
 
 impl CoreRegister for FpCompX {
-    const ADDRESS: u32 = 0xE000_2000;
-    const NAME: &'static str = "FP_CTRL";
+    const ADDRESS: u32 = 0xE000_2008;
+    const NAME: &'static str = "FP_COMPX";
 }
 
 impl From<u32> for FpCompX {

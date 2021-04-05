@@ -5,9 +5,10 @@ use crate::error::Error;
 use crate::memory::Memory;
 use crate::{
     architecture::arm::communication_interface::Initialized,
+    config::Architecture,
     core::{
-        Architecture, CoreInformation, CoreInterface, CoreRegister, CoreRegisterAddress,
-        RegisterDescription, RegisterFile, RegisterKind,
+        CoreInformation, CoreInterface, CoreRegister, CoreRegisterAddress, RegisterDescription,
+        RegisterFile, RegisterKind,
     },
 };
 use crate::{CoreStatus, DebugProbeError, HaltReason, MemoryInterface};

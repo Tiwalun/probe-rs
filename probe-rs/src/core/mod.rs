@@ -2,6 +2,7 @@ pub(crate) mod communication_interface;
 
 pub use communication_interface::CommunicationInterface;
 
+use crate::config::{Architecture, CoreType};
 use crate::DebugProbeError;
 use crate::{architecture::arm::communication_interface::Initialized, error};
 use crate::{
@@ -222,51 +223,6 @@ impl<'probe> MemoryInterface for Core<'probe> {
     }
 }
 
-#[derive(Copy, Clone)]
-pub enum CoreType {
-    M3,
-    M4,
-    M33,
-    M0,
-    M7,
-    Riscv,
-}
-
-impl CoreType {
-    pub(crate) fn from_string(name: impl AsRef<str>) -> Option<Self> {
-        match &name.as_ref().to_ascii_lowercase()[..] {
-            "m0" => Some(CoreType::M0),
-            "m4" => Some(CoreType::M4),
-            "m3" => Some(CoreType::M3),
-            "m33" => Some(CoreType::M33),
-            "riscv" => Some(CoreType::Riscv),
-            "m7" => Some(CoreType::M7),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn from(value: &SpecificCoreState) -> Self {
-        match value {
-            SpecificCoreState::M0(_) => CoreType::M0,
-            SpecificCoreState::M3(_) => CoreType::M3,
-            SpecificCoreState::M33(_) => CoreType::M33,
-            SpecificCoreState::M4(_) => CoreType::M4,
-            SpecificCoreState::M7(_) => CoreType::M7,
-            SpecificCoreState::Riscv => CoreType::Riscv,
-        }
-    }
-    pub(crate) fn architecture(&self) -> Architecture {
-        match self {
-            CoreType::M0 => Architecture::Arm,
-            CoreType::M3 => Architecture::Arm,
-            CoreType::M33 => Architecture::Arm,
-            CoreType::M4 => Architecture::Arm,
-            CoreType::M7 => Architecture::Arm,
-            CoreType::Riscv => Architecture::Riscv,
-        }
-    }
-}
-
 #[derive(Debug)]
 pub struct CoreState {
     id: usize,
@@ -301,6 +257,17 @@ impl SpecificCoreState {
             CoreType::M4 => SpecificCoreState::M4(CortexState::new()),
             CoreType::M7 => SpecificCoreState::M7(CortexState::new()),
             CoreType::Riscv => SpecificCoreState::Riscv,
+        }
+    }
+
+    pub(crate) fn core_type(&self) -> CoreType {
+        match self {
+            SpecificCoreState::M0(_) => CoreType::M0,
+            SpecificCoreState::M3(_) => CoreType::M3,
+            SpecificCoreState::M33(_) => CoreType::M33,
+            SpecificCoreState::M4(_) => CoreType::M4,
+            SpecificCoreState::M7(_) => CoreType::M7,
+            SpecificCoreState::Riscv => CoreType::Riscv,
         }
     }
 
@@ -582,12 +549,6 @@ impl BreakpointId {
 pub struct Breakpoint {
     address: u32,
     register_hw: usize,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Architecture {
-    Arm,
-    Riscv,
 }
 
 #[derive(Debug, PartialEq, Copy, Clone)]

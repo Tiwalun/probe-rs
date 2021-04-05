@@ -1,13 +1,11 @@
 use std::sync::Arc;
 
-use super::chip::Chip;
-use super::flash_algorithm::RawFlashAlgorithm;
-use super::memory::MemoryRegion;
+use super::{Chip, CoreType, MemoryRegion, RawFlashAlgorithm, TargetDescriptionSource};
 use crate::{
     architecture::arm::{
         communication_interface::UninitializedArmProbe, sequences::DefaultArmSequence,
     },
-    core::{Architecture, CoreType},
+    config::Architecture,
     Error, Memory,
 };
 
@@ -24,6 +22,8 @@ pub struct Target {
     pub memory_map: Vec<MemoryRegion>,
 
     pub debug_sequence: Arc<DebugSequence>,
+    /// Source of the target description. Used for diagnostics.
+    pub(crate) source: TargetDescriptionSource,
 }
 
 impl std::fmt::Debug for Target {
@@ -49,6 +49,7 @@ impl Target {
         chip: &Chip,
         flash_algorithms: Vec<RawFlashAlgorithm>,
         core_type: CoreType,
+        source: TargetDescriptionSource,
     ) -> Target {
         let debug_sequence = match core_type.architecture() {
             Architecture::Arm => DebugSequence::Arm(Box::new(DefaultArmSequence {})),
@@ -56,17 +57,23 @@ impl Target {
         };
 
         Target {
-            name: chip.name.clone().into_owned(),
+            name: chip.name.clone(),
             flash_algorithms,
             core_type,
-            memory_map: chip.memory_map.clone().into_owned(),
+            memory_map: chip.memory_map.clone(),
             debug_sequence: Arc::new(debug_sequence),
+            source,
         }
     }
 
     /// Get the architectre of the target
     pub fn architecture(&self) -> Architecture {
         self.core_type.architecture()
+    }
+
+    /// Source description of this target.
+    pub fn source(&self) -> &TargetDescriptionSource {
+        &self.source
     }
 }
 

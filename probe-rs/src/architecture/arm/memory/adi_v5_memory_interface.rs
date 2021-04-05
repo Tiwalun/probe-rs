@@ -3,7 +3,7 @@ use super::super::ap::{
 };
 use crate::architecture::arm::{
     communication_interface::Initialized, dp::DPAccess, ArmCommunicationInterface,
-    MemoryApInformation,
+    ArmProbeInterface, MemoryApInformation,
 };
 use crate::{CommunicationInterface, CoreRegister, CoreRegisterAddress, DebugProbeError, Error};
 use scroll::{Pread, Pwrite, LE};
@@ -38,7 +38,7 @@ pub trait ArmProbe {
 }
 
 /// A struct to give access to a targets memory using a certain DAP.
-pub(in crate::architecture::arm) struct ADIMemoryInterface<'interface, AP>
+pub(crate) struct ADIMemoryInterface<'interface, AP>
 where
     AP: CommunicationInterface
         + APAccess<MemoryAP, CSW>
@@ -47,6 +47,8 @@ where
         + DPAccess,
 {
     interface: &'interface mut AP,
+
+    // This flag indicates if only 32-bit wide memory accesses are supported.
     only_32bit_data_size: bool,
 
     // Does the connected memory AP support the HNONSEC bit?
@@ -62,15 +64,19 @@ where
     cached_csw_value: Option<CSW>,
 }
 
-impl<'interface> ADIMemoryInterface<'interface, ArmCommunicationInterface<Initialized>> {
+impl<'interface, AP> ADIMemoryInterface<'interface, AP>
+where
+    AP: CommunicationInterface
+        + APAccess<MemoryAP, CSW>
+        + APAccess<MemoryAP, TAR>
+        + APAccess<MemoryAP, DRW>
+        + DPAccess,
+{
     /// Creates a new MemoryInterface for given AccessPort.
     pub fn new(
-        interface: &'interface mut ArmCommunicationInterface<Initialized>,
+        interface: &'interface mut AP,
         ap_information: &MemoryApInformation,
-    ) -> Result<
-        ADIMemoryInterface<'interface, ArmCommunicationInterface<Initialized>>,
-        AccessPortError,
-    > {
+    ) -> Result<ADIMemoryInterface<'interface, AP>, AccessPortError> {
         Ok(Self {
             interface,
             only_32bit_data_size: ap_information.only_32bit_data_size,
@@ -611,9 +617,12 @@ where
         + APAccess<MemoryAP, TAR>
         + APAccess<MemoryAP, DRW>
         + DPAccess,
-        */
+{
+
+*/
 
 impl ArmProbe for ADIMemoryInterface<'_, ArmCommunicationInterface<Initialized>> {
+    /* impl ArmProbe for ADIMemoryInterface<'_, ArmCommunicationInterface<Initialized>> { */
     fn read_core_reg(&mut self, ap: MemoryAP, addr: CoreRegisterAddress) -> Result<u32, Error> {
         // Write the DCRSR value to select the register we want to read.
         let mut dcrsr_val = Dcrsr(0);
@@ -814,18 +823,24 @@ fn aligned_range(address: u32, len: usize) -> Result<Range<u32>, AccessPortError
 
 #[cfg(test)]
 mod tests {
+    use crate::architecture::arm::MemoryApInformation;
+
     use super::super::super::ap::memory_ap::mock::MockMemoryAP;
     use super::ADIMemoryInterface;
 
     impl<'interface> ADIMemoryInterface<'interface, MockMemoryAP> {
         /// Creates a new MemoryInterface for given AccessPort.
-        fn new(mock: &'interface mut MockMemoryAP) -> ADIMemoryInterface<'interface, MockMemoryAP> {
-            Self {
-                interface: mock,
+        fn new_mock(
+            mock: &'interface mut MockMemoryAP,
+        ) -> ADIMemoryInterface<'interface, MockMemoryAP> {
+            let ap_information = MemoryApInformation {
+                port_number: 0,
                 only_32bit_data_size: false,
+                debug_base_address: 0xf000_0000,
                 supports_hnonsec: false,
-                cached_csw_value: None,
-            }
+            };
+
+            Self::new(mock, &ap_information).unwrap()
         }
 
         fn mock_memory(&self) -> &[u8] {
@@ -845,7 +860,7 @@ mod tests {
     fn read_word_32() {
         let mut mock = MockMemoryAP::with_pattern();
         mock.memory[..8].copy_from_slice(&DATA8[..8]);
-        let mut mi = ADIMemoryInterface::<MockMemoryAP>::new(&mut mock);
+        let mut mi = ADIMemoryInterface::new_mock(&mut mock);
 
         for &address in &[0, 4] {
             let value = mi
@@ -859,7 +874,7 @@ mod tests {
     fn read_word_8() {
         let mut mock = MockMemoryAP::with_pattern();
         mock.memory[..8].copy_from_slice(&DATA8[..8]);
-        let mut mi = ADIMemoryInterface::<MockMemoryAP>::new(&mut mock);
+        let mut mi = ADIMemoryInterface::new_mock(&mut mock);
 
         for address in 0..8 {
             let value = mi
@@ -873,7 +888,7 @@ mod tests {
     fn write_word_32() {
         for &address in &[0, 4] {
             let mut mock = MockMemoryAP::with_pattern();
-            let mut mi = ADIMemoryInterface::<MockMemoryAP>::new(&mut mock);
+            let mut mi = ADIMemoryInterface::new_mock(&mut mock);
 
             let mut expected = Vec::from(mi.mock_memory());
             expected[(address as usize)..(address as usize) + 4].copy_from_slice(&DATA8[..4]);
@@ -893,7 +908,7 @@ mod tests {
     fn write_word_8() {
         for address in 0..8 {
             let mut mock = MockMemoryAP::with_pattern();
-            let mut mi = ADIMemoryInterface::<MockMemoryAP>::new(&mut mock);
+            let mut mi = ADIMemoryInterface::new_mock(&mut mock);
 
             let mut expected = Vec::from(mi.mock_memory());
             expected[address] = DATA8[0];
@@ -913,7 +928,7 @@ mod tests {
     fn read_32() {
         let mut mock = MockMemoryAP::with_pattern();
         mock.memory[..DATA8.len()].copy_from_slice(DATA8);
-        let mut mi = ADIMemoryInterface::<MockMemoryAP>::new(&mut mock);
+        let mut mi = ADIMemoryInterface::new_mock(&mut mock);
 
         for &address in &[0, 4] {
             for len in 0..3 {
@@ -937,7 +952,7 @@ mod tests {
     #[test]
     fn read_32_unaligned_should_error() {
         let mut mock = MockMemoryAP::with_pattern();
-        let mut mi = ADIMemoryInterface::<MockMemoryAP>::new(&mut mock);
+        let mut mi = ADIMemoryInterface::new_mock(&mut mock);
 
         for &address in &[1, 3, 127] {
             assert!(mi.read_32(0.into(), address, &mut [0u32; 4]).is_err());
@@ -948,7 +963,7 @@ mod tests {
     fn read_8() {
         let mut mock = MockMemoryAP::with_pattern();
         mock.memory[..DATA8.len()].copy_from_slice(DATA8);
-        let mut mi = ADIMemoryInterface::<MockMemoryAP>::new(&mut mock);
+        let mut mi = ADIMemoryInterface::new_mock(&mut mock);
 
         for address in 0..4 {
             for len in 0..12 {
@@ -973,7 +988,7 @@ mod tests {
         for &address in &[0, 4] {
             for len in 0..3 {
                 let mut mock = MockMemoryAP::with_pattern();
-                let mut mi = ADIMemoryInterface::<MockMemoryAP>::new(&mut mock);
+                let mut mi = ADIMemoryInterface::new_mock(&mut mock);
 
                 let mut expected = Vec::from(mi.mock_memory());
                 expected[address as usize..(address as usize) + len * 4]
@@ -998,7 +1013,7 @@ mod tests {
     #[test]
     fn write_block_u32_unaligned_should_error() {
         let mut mock = MockMemoryAP::with_pattern();
-        let mut mi = ADIMemoryInterface::<MockMemoryAP>::new(&mut mock);
+        let mut mi = ADIMemoryInterface::new_mock(&mut mock);
 
         for &address in &[1, 3, 127] {
             assert!(mi
@@ -1012,7 +1027,7 @@ mod tests {
         for address in 0..4 {
             for len in 0..12 {
                 let mut mock = MockMemoryAP::with_pattern();
-                let mut mi = ADIMemoryInterface::<MockMemoryAP>::new(&mut mock);
+                let mut mi = ADIMemoryInterface::new_mock(&mut mock);
 
                 let mut expected = Vec::from(mi.mock_memory());
                 expected[address as usize..(address as usize) + len].copy_from_slice(&DATA8[..len]);

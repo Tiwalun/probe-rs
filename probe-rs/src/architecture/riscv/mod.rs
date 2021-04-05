@@ -2,7 +2,7 @@
 
 #![allow(clippy::inconsistent_digit_grouping)]
 
-use crate::core::Architecture;
+use crate::config::Architecture;
 use crate::CoreInterface;
 use anyhow::{anyhow, Result};
 use communication_interface::{
