@@ -6,10 +6,7 @@ use crate::{
     core::{CoreInformation, CoreInterface, CoreRegister, CoreRegisterAddress, RegisterFile},
 };
 
-use super::{
-    register, reset_catch_clear, reset_catch_set, reset_system, CortexState, Dfsr,
-    ARM_REGISTER_FILE,
-};
+use super::{register, reset_catch_set, reset_system, CortexState, Dfsr, ARM_REGISTER_FILE};
 use crate::{
     config::Architecture,
     core::{CoreStatus, HaltReason},

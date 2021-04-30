@@ -34,6 +34,7 @@ pub(crate) fn reset_catch_set(core: &mut impl MemoryInterface) -> Result<(), Err
     Ok(())
 }
 
+/*
 /// Undo the settings of the `reset_catch_set` function.
 /// This is based on the `ResetCatchSet` function from
 /// the [ARM SVD Debug Description].
@@ -49,6 +50,8 @@ pub(crate) fn reset_catch_clear(core: &mut impl MemoryInterface) -> Result<(), E
     core.write_word_32(Demcr::ADDRESS, demcr.into())?;
     Ok(())
 }
+
+*/
 
 pub(crate) fn reset_system(core: &mut impl MemoryInterface) -> Result<(), Error> {
     use crate::architecture::arm::core::m4::{Aircr, Dhcsr};
