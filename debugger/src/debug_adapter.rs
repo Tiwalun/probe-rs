@@ -28,7 +28,7 @@ pub enum DebugAdapterType {
 }
 
 pub struct DebugAdapter<R: Read, W: Write> {
-    seq: i64,
+    pub(crate) seq: i64,
     input: BufReader<R>,
     output: W,
     /// Track the last_known_status of the probe.
@@ -49,6 +49,13 @@ pub struct DebugAdapter<R: Read, W: Write> {
     /// It is cleared by `threads()`, populated by stack_trace(), for later nested re-use by `variables()`.
     variable_map_key_seq: i64, // Used to create unique values for `self.variable_map` keys.
     variable_map: HashMap<i64, Vec<Variable>>,
+}
+
+#[derive(Debug)]
+pub enum RequestResponse {
+    Request(Request),
+    ProcessNextRequest,
+    Error,
 }
 
 impl<R: Read, W: Write> DebugAdapter<R, W> {
@@ -1136,7 +1143,7 @@ impl<R: Read, W: Write> DebugAdapter<R, W> {
 
     /// Returns one of the standard DAP Requests if all goes well, or a "error" request, which should indicate that the calling function should return.
     /// When preparing to return an "error" request, we will send a Response containing the DebuggerError encountered.
-    pub fn listen_for_request(&mut self) -> Request {
+    pub fn listen_for_request(&mut self) -> RequestResponse {
         if self.adapter_type == DebugAdapterType::CommandLine {
             let readline = self.rl.as_mut().unwrap().readline(">> ");
             let line = match readline {
@@ -1160,7 +1167,7 @@ impl<R: Read, W: Write> DebugAdapter<R, W> {
                                     actual_error
                                 ))),
                             );
-                            return request;
+                            return RequestResponse::Error;
                         }
                     }
                 }
@@ -1175,12 +1182,12 @@ impl<R: Read, W: Write> DebugAdapter<R, W> {
             } else {
                 None
             };
-            Request {
+            RequestResponse::Request(Request {
                 arguments,
                 command: command_name.to_string(),
                 seq: self.seq,
                 type_: "request".to_string(),
-            }
+            })
         } else {
             // DebugAdapterType::DapClient
             match self.receive_data() {
@@ -1208,7 +1215,7 @@ impl<R: Read, W: Write> DebugAdapter<R, W> {
                                                     ));
                                                 }
                                             }
-                                            request
+                                            RequestResponse::Request(request)
                                         }
                                         Err(error) => {
                                             let request = Request {
@@ -1218,7 +1225,7 @@ impl<R: Read, W: Write> DebugAdapter<R, W> {
                                                 type_: "request".to_owned(),
                                             };
                                             self.send_response::<Request>( &request, Err(DebuggerError::Other(anyhow!("Error encoding ProtocolMessage to Request: {:?}", error))));
-                                            request
+                                            RequestResponse::Error
                                         }
                                     }
                                 }
@@ -1236,7 +1243,7 @@ impl<R: Read, W: Write> DebugAdapter<R, W> {
                                             other
                                         ))),
                                     );
-                                    request
+                                    RequestResponse::Error
                                 }
                             }
                         }
@@ -1251,7 +1258,7 @@ impl<R: Read, W: Write> DebugAdapter<R, W> {
                                 &request,
                                 Err(DebuggerError::Other(anyhow!("{}", error))),
                             );
-                            request
+                            RequestResponse::Error
                         }
                     }
                 }
@@ -1270,12 +1277,7 @@ impl<R: Read, W: Write> DebugAdapter<R, W> {
                             if original_error.kind() == std::io::ErrorKind::WouldBlock {
                                 // Non-blocking read is waiting for incoming data that is not ready yet.
                                 // This is not a real error, so use this opportunity to check on probe status and notify the debug client if required.
-                                return Request {
-                                    arguments: None,
-                                    command: "process_next_request".to_owned(),
-                                    seq: self.seq,
-                                    type_: "request".to_owned(),
-                                };
+                                return RequestResponse::ProcessNextRequest;
                             } else {
                                 // This is a legitimate error. Tell the client about it.
                                 self.send_response::<Request>(
@@ -1292,7 +1294,7 @@ impl<R: Read, W: Write> DebugAdapter<R, W> {
                             );
                         }
                     }
-                    request
+                    RequestResponse::Request(request)
                 }
             }
         }

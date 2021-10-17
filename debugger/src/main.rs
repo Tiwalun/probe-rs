@@ -7,8 +7,8 @@ mod rtt;
 
 use anyhow::Result;
 use debugger::{
-    debug, download_program_fast, dump_memory, list_connected_devices, reset_target_of_device,
-    trace_u32_on_target, DebuggerOptions,
+    debug_cli, debug_dap, download_program_fast, dump_memory, list_connected_devices,
+    reset_target_of_device, trace_u32_on_target, DebuggerOptions,
 };
 use probe_rs::architecture::arm::ap::AccessPortError;
 use probe_rs::flashing::FileDownloadError;
@@ -104,11 +104,15 @@ enum CliCommands {
     Debug {
         #[structopt(flatten)]
         debugger_options: DebuggerOptions,
-
-        // TODO: Implement multi-session --server choices
-        /// Switch from using CLI to DAP Protocol debug commands. By default, the DAP communication for the first session is via STDIN and STDOUT. Adding the additional --port property will run as an IP server, listening to connections on the specified port.
-        #[structopt(long)]
-        dap: bool,
+    },
+    /// DAP Open target in debug mode and accept debug commands.
+    /// Switch from using CLI to DAP Protocol debug commands. By default, the DAP communication for the first session is via STDIN and STDOUT. Adding the additional --port property will run as an IP server, listening to connections on the specified port.
+    #[structopt(name = "dap")]
+    Dap {
+        #[structopt(flatten)]
+        debugger_options: DebuggerOptions,
+        /// IP port number to listen for incoming DAP connections, e.g. "50000"
+        port: Option<u16>,
     },
     /// Dump memory from attached target
     #[structopt(name = "dump")]
@@ -163,8 +167,13 @@ fn main() -> Result<()> {
             debugger_options,
             // program_binary,
             // port,
-            dap,
-        } => debug(debugger_options, dap),
+        } => debug_cli(debugger_options),
+        CliCommands::Dap {
+            debugger_options,
+            // program_binary,
+            // port,
+            port,
+        } => debug_dap(debugger_options, port)?,
         CliCommands::Dump {
             debugger_options,
             loc,
