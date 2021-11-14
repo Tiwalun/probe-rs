@@ -3,7 +3,7 @@ use crate::protocol::{CliAdapter, DapAdapter, ProtocolAdapter};
 use crate::{dap_types::*, rtt::*};
 
 use crate::DebuggerError;
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use capstone::{arch::arm::ArchMode, prelude::*, Capstone, Endian};
 use probe_rs::debug::DebugInfo;
 use probe_rs::flashing::{download_file, download_file_with_options, DownloadOptions, Format};
@@ -356,9 +356,9 @@ pub fn attach_core<'p>(
 #[derive(Debug)]
 /// The `DebuggerStatus` is used to control how the Debugger::debug_session() decides if it should respond to DAP Client requests such as `Terminate`, `Disconnect`, and `Reset`, as well as how to repond to unrecoverable errors during a debug session interacting with a target session.
 pub(crate) enum DebuggerStatus {
-    SuccessContinueSession,
-    SuccessTerminateSession,
-    SuccessTerminateDebugger,
+    ContinueSession,
+    TerminateSession,
+    TerminateDebugger,
 }
 
 /// #Debugger Overview
@@ -521,18 +521,18 @@ impl Debugger {
                 - If the `new_status` is `Running`, then we have to poll on a regular basis, until the Probe stops for good reasons like breakpoints, or bad reasons like panics. Then tell the DAP-Client.
                 */
                 match debug_adapter.last_known_status {
-                    CoreStatus::Unknown => Ok(DebuggerStatus::SuccessContinueSession), // Don't do anything until we know VSCode's startup sequence is complete, and changes this to either Halted or Running.
+                    CoreStatus::Unknown => Ok(DebuggerStatus::ContinueSession), // Don't do anything until we know VSCode's startup sequence is complete, and changes this to either Halted or Running.
                     CoreStatus::Halted(_) => {
                         // No need to poll the target if we know it is halted and waiting for us to do something.
                         thread::sleep(Duration::from_millis(50)); // Small delay to reduce fast looping costs on the client
-                        Ok(DebuggerStatus::SuccessContinueSession)
+                        Ok(DebuggerStatus::ContinueSession)
                     }
                     _other => {
                         let mut core_data =
                             match attach_core(&mut session_data.session, &self.debugger_options) {
                                 Ok(core_data) => core_data,
                                 Err(error) => {
-                                    debug_adapter.send_error_response(&error);
+                                    let _ = debug_adapter.send_error_response(&error);
                                     return Err(error);
                                 }
                             };
@@ -558,7 +558,7 @@ impl Debugger {
                             Ok(new_status) => new_status,
                             Err(error) => {
                                 let error = DebuggerError::ProbeRs(error);
-                                debug_adapter.send_error_response(&error);
+                                let _ = debug_adapter.send_error_response(&error);
                                 return Err(error);
                             }
                         };
@@ -567,10 +567,10 @@ impl Debugger {
                         // Otherwise loop again to keep things flowing as fast as possible.
                         // The justification is that any client side CPU used to keep polling is a small price to pay for maximum throughput of debug requests and RTT from the probe.
                         if received_rtt_data && new_status == debug_adapter.last_known_status {
-                            return Ok(DebuggerStatus::SuccessContinueSession);
+                            return Ok(DebuggerStatus::ContinueSession);
                         } else if new_status == debug_adapter.last_known_status {
                             thread::sleep(Duration::from_millis(50)); // Small delay to reduce fast looping costs.
-                            return Ok(DebuggerStatus::SuccessContinueSession);
+                            return Ok(DebuggerStatus::ContinueSession);
                         } else {
                             debug_adapter.last_known_status = new_status;
                         };
@@ -581,7 +581,7 @@ impl Debugger {
                                     all_threads_continued: Some(true),
                                     thread_id: core_data.target_core.id() as i64,
                                 });
-                                debug_adapter.send_event("continued", event_body);
+                                debug_adapter.send_event("continued", event_body)?;
                             }
                             CoreStatus::Halted(_) => {
                                 let event_body = Some(StoppedEventBody {
@@ -593,7 +593,7 @@ impl Debugger {
                                     all_threads_stopped: Some(true),
                                     hit_breakpoint_ids: None,
                                 });
-                                debug_adapter.send_event("stopped", event_body);
+                                debug_adapter.send_event("stopped", event_body)?;
                             }
                             CoreStatus::LockedUp => {
                                 debug_adapter.show_message(
@@ -606,23 +606,23 @@ impl Debugger {
                                     .to_owned())));
                             }
                             CoreStatus::Unknown => {
-                                debug_adapter.send_error_response(&DebuggerError::Other(anyhow!(
-                                    "Unknown Device status reveived from Probe-rs"
-                                )));
+                                debug_adapter.send_error_response(&DebuggerError::Other(
+                                    anyhow!("Unknown Device status reveived from Probe-rs"),
+                                ))?;
 
                                 return Err(DebuggerError::Other(anyhow!(
                                     "Unknown Device status reveived from Probe-rs"
                                 )));
                             }
                         };
-                        Ok(DebuggerStatus::SuccessContinueSession)
+                        Ok(DebuggerStatus::ContinueSession)
                     }
                 }
             }
             Some(request) => match request.command.as_ref() {
                 "disconnect" => {
-                    debug_adapter.send_response::<()>(&request, Ok(None));
-                    Ok(DebuggerStatus::SuccessTerminateSession)
+                    debug_adapter.send_response::<()>(request, Ok(None))?;
+                    Ok(DebuggerStatus::TerminateSession)
                 }
                 "terminate" => {
                     let mut core_data =
@@ -630,7 +630,7 @@ impl Debugger {
                             Ok(core_data) => core_data,
                             Err(error) => {
                                 let error = Err(error);
-                                debug_adapter.send_response::<()>(&request, error);
+                                debug_adapter.send_response::<()>(request, error)?;
 
                                 // TODO: Nicer response
                                 return Err(DebuggerError::Other(anyhow!(
@@ -638,19 +638,19 @@ impl Debugger {
                                 )));
                             }
                         };
-                    debug_adapter.pause(&mut core_data, &request);
-                    Ok(DebuggerStatus::SuccessTerminateSession)
+                    debug_adapter.pause(&mut core_data, request)?;
+                    Ok(DebuggerStatus::TerminateSession)
                 }
                 "quit" => {
-                    debug_adapter.send_response::<()>(&request, Ok(None));
-                    Ok(DebuggerStatus::SuccessTerminateDebugger)
+                    debug_adapter.send_response::<()>(request, Ok(None))?;
+                    Ok(DebuggerStatus::TerminateDebugger)
                 }
                 "help" => {
                     println!("The following commands are available:");
                     for cmd in self.supported_commands.iter() {
                         println!(" - {:<30} : {}", cmd.cli_cmd, cmd.help_text);
                     }
-                    Ok(DebuggerStatus::SuccessContinueSession)
+                    Ok(DebuggerStatus::ContinueSession)
                 }
                 command_lookup => {
                     let valid_command = self
@@ -666,7 +666,7 @@ impl Debugger {
                             ) {
                                 Ok(core_data) => core_data,
                                 Err(error) => {
-                                    debug_adapter.send_response::<()>(&request, Err(error));
+                                    debug_adapter.send_response::<()>(request, Err(error));
                                     return Err(DebuggerError::Other(anyhow!(
                                         "Failed to attach to core"
                                     )));
@@ -696,7 +696,7 @@ impl Debugger {
                                                     }
                                                     Err(error) => {
                                                         debug_adapter.send_response::<()>(
-                                                            &request,
+                                                            request,
                                                             Err(DebuggerError::Other(anyhow!(
                                                                 "{}", error
                                                             ))),
@@ -709,7 +709,7 @@ impl Debugger {
                                         Err(error) => {
                                             let wrapped_err = DebuggerError::ProbeRs(error);
                                             debug_adapter
-                                                .send_response::<()>(&request, Err(wrapped_err));
+                                                .send_response::<()>(request, Err(wrapped_err));
 
                                             // TODO: Nicer response here
                                             return Err(DebuggerError::Other(anyhow!(
@@ -721,18 +721,16 @@ impl Debugger {
                                 _ => {}
                             }
                             let command_status = match valid_command.function_name {
-                                "status" => debug_adapter.status(&mut core_data, &request),
-                                "next" => debug_adapter.next(&mut core_data, &request),
-                                "pause" => debug_adapter.pause(&mut core_data, &request),
-                                "read_memory" => {
-                                    debug_adapter.read_memory(&mut core_data, &request)
-                                }
-                                "write" => debug_adapter.write(&mut core_data, &request),
+                                "status" => debug_adapter.status(&mut core_data, request),
+                                "next" => debug_adapter.next(&mut core_data, request),
+                                "pause" => debug_adapter.pause(&mut core_data, request),
+                                "read_memory" => debug_adapter.read_memory(&mut core_data, request),
+                                "write" => debug_adapter.write(&mut core_data, request),
                                 "set_breakpoint" => {
-                                    debug_adapter.set_breakpoint(&mut core_data, &request)
+                                    debug_adapter.set_breakpoint(&mut core_data, request)
                                 }
                                 "clear_breakpoint" => {
-                                    debug_adapter.clear_breakpoint(&mut core_data, &request)
+                                    debug_adapter.clear_breakpoint(&mut core_data, request)
                                 }
                                 "show_cpu_register_values" => {
                                     debug_adapter.show_cpu_register_values(&mut core_data, &request)
@@ -741,76 +739,78 @@ impl Debugger {
                                     debug_adapter.dump_cpu_state(&mut core_data, &request)
                                 }
                                 "configuration_done" => {
-                                    debug_adapter.configuration_done(&mut core_data, &request)
+                                    debug_adapter.configuration_done(&mut core_data, request)
                                 }
-                                "threads" => debug_adapter.threads(&mut core_data, &request),
-                                "restart" => debug_adapter.restart(&mut core_data, Some(&request)),
+                                "threads" => debug_adapter.threads(&mut core_data, request),
+                                "restart" => debug_adapter.restart(&mut core_data, Some(request)),
                                 "set_breakpoints" => {
-                                    debug_adapter.set_breakpoints(&mut core_data, &request)
+                                    debug_adapter.set_breakpoints(&mut core_data, request)
                                 }
-                                "stack_trace" => {
-                                    debug_adapter.stack_trace(&mut core_data, &request)
-                                }
-                                "scopes" => debug_adapter.scopes(&mut core_data, &request),
-                                "source" => debug_adapter.source(&mut core_data, &request),
-                                "variables" => debug_adapter.variables(&mut core_data, &request),
-                                "continue" => debug_adapter.r#continue(&mut core_data, &request),
+                                "stack_trace" => debug_adapter.stack_trace(&mut core_data, request),
+                                "scopes" => debug_adapter.scopes(&mut core_data, request),
+                                "source" => debug_adapter.source(&mut core_data, request),
+                                "variables" => debug_adapter.variables(&mut core_data, request),
+                                "continue" => debug_adapter.r#continue(&mut core_data, request),
                                 other => {
                                     debug_adapter.send_response::<()>(
-                                    &request,
+                                    request,
                                     Err(DebuggerError::Other(anyhow!("Received request '{}', which is not supported or not implemented yet", other))),
                                 );
-                                    true
+                                    Ok(())
                                 }
                             };
+
                             if unhalt_me {
                                 match core_data.target_core.run() {
                                     Ok(_) => debug_adapter.last_known_status = CoreStatus::Running,
                                     Err(error) => {
-                                        debug_adapter.send_response::<()>(
-                                            &request,
-                                            Err(DebuggerError::Other(anyhow!("{}", error))),
-                                        );
+                                        debug_adapter.send_error_response(&DebuggerError::Other(
+                                            anyhow!("{}", error),
+                                        ));
                                         return Err(error.into());
                                     }
                                 }
                             }
-                            if command_status {
-                                Ok(DebuggerStatus::SuccessContinueSession)
-                            } else {
-                                Err(DebuggerError::Other(anyhow!("Failed to execute command!")))
+
+                            match command_status {
+                                Ok(()) => Ok(DebuggerStatus::ContinueSession),
+                                Err(e) => Err(DebuggerError::Other(
+                                    e.context("Failed to execute command."),
+                                )),
                             }
                         }
                         None => {
+                            let command = command_lookup.to_string();
+
                             // Unimplemented command.
                             if debug_adapter.adapter_type() == DebugAdapterType::DapClient {
                                 debug_adapter.log_to_console(format!(
                                     "ERROR: Received unsupported request '{}'\n",
-                                    command_lookup
+                                    command
                                 ));
                                 debug_adapter
                                     .send_response::<()>(
-                                        &request,
+                                        request,
                                         Err(DebuggerError::Other(anyhow!(
                                         "ERROR: Received request '{}', which is not supported or not implemented yet",
-                                        command_lookup
+                                        command
                                     )
                                         )),
                                     );
                                 Err(DebuggerError::Other(anyhow!(
                                         "ERROR: Received request '{}', which is not supported or not implemented yet",
-                                        command_lookup
+                                        command
 
                                 )))
                             } else {
                                 debug_adapter.send_response::<()>(
-                                    &request,
+                                    request,
                                     Err(DebuggerError::Other(anyhow!(
                                         "Unknown command '{}'. Enter 'help' for a list of commands",
-                                        command_lookup
+                                        command
                                     ))),
                                 );
-                                Ok(DebuggerStatus::SuccessContinueSession)
+                                Ok(DebuggerStatus::ContinueSession)
                             }
                         }
                     }
@@ -858,16 +858,19 @@ impl Debugger {
                 match current_request.command.as_str() {
                     "initialize" => break current_request, // We have lift off.
                     other => {
+                        let command = other.to_string();
+
                         debug_adapter.send_response::<()>(
-                            &current_request,
-                            Err(
-                                anyhow!("Initial command was '{}', expected 'initialize'", other)
-                                    .into(),
-                            ),
+                            current_request,
+                            Err(anyhow!(
+                                "Initial command was '{}', expected 'initialize'",
+                                command
+                            )
+                            .into()),
                         );
                         return Err(DebuggerError::Other(anyhow!(
                             "Initial command was '{}', expected 'initialize'",
-                            other
+                            command
                         )));
                     }
                 };
@@ -882,13 +885,13 @@ impl Debugger {
                     if arguments.columns_start_at_1.unwrap() && arguments.lines_start_at_1.unwrap()
                     {
                     } else {
-                        debug_adapter.send_response::<()>(&initialize_request, Err(DebuggerError::Other(anyhow!("Unsupported Capability: Client requested column and row numbers start at 0."))));
+                        debug_adapter.send_response::<()>(initialize_request, Err(DebuggerError::Other(anyhow!("Unsupported Capability: Client requested column and row numbers start at 0."))));
                         return Err(DebuggerError::Other(anyhow!("Unsupported Capability: Client requested column and row numbers start at 0.")));
                     }
                     arguments
                 }
                 Err(error) => {
-                    debug_adapter.send_response::<()>(&initialize_request, Err(error));
+                    debug_adapter.send_response::<()>(initialize_request, Err(error));
                     return Err(DebuggerError::Other(anyhow!(
                         "Failed to get initialize arguments"
                     )));
@@ -912,7 +915,7 @@ impl Debugger {
                 // supports_exception_filter_options: Some (true),
                 ..Default::default()
             };
-            debug_adapter.send_response(&initialize_request, Ok(Some(capabilities)));
+            debug_adapter.send_response(initialize_request, Ok(Some(capabilities)));
 
             // Process either the Launch or Attach request.
             let requested_target_session_type: Option<TargetSessionType>;
@@ -933,17 +936,16 @@ impl Debugger {
                         break current_request;
                     }
                     other => {
-                        debug_adapter.send_response::<()>(
-                            &current_request,
-                            Err(DebuggerError::Other(anyhow!(
-                                "Expected request 'launch' or 'attach', but received' {}'",
-                                other
-                            ))),
-                        );
-                        return Err(DebuggerError::Other(anyhow!(
+                        let error_msg = format!(
                             "Expected request 'launch' or 'attach', but received' {}'",
                             other
-                        )));
+                        );
+
+                        debug_adapter.send_response::<()>(
+                            current_request,
+                            Err(DebuggerError::Other(anyhow!(error_msg.clone()))),
+                        );
+                        return Err(DebuggerError::Other(anyhow!(error_msg)));
                     }
                 };
             };
@@ -967,7 +969,7 @@ impl Debugger {
                                 || self.debugger_options.restore_unwritten_bytes
                             {
                                 debug_adapter.send_response::<()>(
-                                        &la_request,
+                                        la_request,
                                         Err(DebuggerError::Other(anyhow!(
                                             "Please do not use any of the `flashing_enabled`, `reset_after_flashing`, halt_after_reset`, `full_chip_erase`, or `restore_unwritten_bytes` options when using `attach` request type."))),
                                     );
@@ -992,7 +994,7 @@ impl Debugger {
                         Some(program_binary) => {
                             if !program_binary.is_file() {
                                 debug_adapter.send_response::<()>(
-                                    &initialize_request,
+                                    la_request,
                                     Err(DebuggerError::Other(anyhow!(
                                         "Invalid program binary file specified '{:?}'",
                                         program_binary
@@ -1006,7 +1008,7 @@ impl Debugger {
                         }
                         None => {
                             debug_adapter.send_response::<()>(
-                                &initialize_request,
+                                la_request,
                                 Err(DebuggerError::Other(anyhow!(
                                 "Please use the --program-binary option to specify an executable"
                             ))),
@@ -1017,19 +1019,23 @@ impl Debugger {
                             )));
                         }
                     }
-                    debug_adapter.send_response::<()>(&la_request, Ok(None));
+                    debug_adapter.send_response::<()>(la_request, Ok(None));
                 }
                 Err(error) => {
-                    debug_adapter
-                        .send_response::<()>(&la_request, Err(DebuggerError::Other(anyhow!(
+                    let err_1 = anyhow!(
 
                         "Could not derive DebuggerOptions from request '{}', with arguments {:?}\n{:?} ", la_request.command, la_request.arguments, error
 
-                        ))));
+                        );
+                    let err_2 =anyhow!(
 
-                    return Err(DebuggerError::Other(anyhow!(
                         "Could not derive DebuggerOptions from request '{}', with arguments {:?}\n{:?} ", la_request.command, la_request.arguments, error
-                            )));
+
+                        );
+
+                    debug_adapter.send_response::<()>(la_request, Err(DebuggerError::Other(err_1)));
+
+                    return Err(DebuggerError::Other(err_2));
                 }
             };
         } else {
@@ -1138,19 +1144,19 @@ impl Debugger {
                 }
             };
 
-            if self.debugger_options.flashing_enabled
-                && self.debugger_options.reset_after_flashing
-                && !debug_adapter.restart(&mut core_data, None)
+            if self.debugger_options.flashing_enabled && self.debugger_options.reset_after_flashing
             {
-                return Err(DebuggerError::Other(anyhow!("Failed to restart core")));
+                debug_adapter
+                    .restart(&mut core_data, None)
+                    .context("Failed to restart core")?;
             }
         }
 
         // After flashing and forced setup, we can signal the client that are ready to receive incoming requests.
         // Send the `initalized` event to client.
-        if !debug_adapter
+        if debug_adapter
             .send_event::<Event>("initialized", None)
-            .is_ok()
+            .is_err()
         {
             let error =
                 DebuggerError::Other(anyhow!("Failed sending 'initialized' event to DAP Client"));
@@ -1163,7 +1169,7 @@ impl Debugger {
         // Loop through remaining (user generated) requests and send to the [processs_request] method until either the client or some unexpected behaviour termintates the process.
         loop {
             match self.process_next_request(&mut session_data, &mut debug_adapter) {
-                Ok(DebuggerStatus::SuccessContinueSession) => {
+                Ok(DebuggerStatus::ContinueSession) => {
                     // Validate and if necessary, initialize the RTT structure.
                     if debug_adapter.adapter_type() == DebugAdapterType::DapClient
                         && self.debugger_options.rtt.enabled
@@ -1212,11 +1218,11 @@ impl Debugger {
                         }
                     }
                 }
-                Ok(DebuggerStatus::SuccessTerminateSession) => {
-                    return Ok(DebuggerStatus::SuccessTerminateSession);
+                Ok(DebuggerStatus::TerminateSession) => {
+                    return Ok(DebuggerStatus::TerminateSession);
                 }
-                Ok(DebuggerStatus::SuccessTerminateDebugger) => {
-                    return Ok(DebuggerStatus::SuccessTerminateDebugger);
+                Ok(DebuggerStatus::TerminateDebugger) => {
+                    return Ok(DebuggerStatus::TerminateDebugger);
                 }
                 Err(e) => {
                     if debug_adapter.adapter_type() == DebugAdapterType::DapClient {
@@ -1449,15 +1455,15 @@ pub fn debug(debugger_options: DebuggerOptions, dap: bool, vscode: bool) -> Resu
                             let debug_adapter = DebugAdapter::new(dap_adapter);
 
                             match debugger.debug_session(debug_adapter) {
-                                Err(_) | Ok(DebuggerStatus::SuccessTerminateSession) => {
+                                Err(_) | Ok(DebuggerStatus::TerminateSession) => {
                                     println!(
                                         "{} CONSOLE: ....Closing session from  :{}",
                                         &program_name, addr
                                     );
                                 }
-                                Ok(DebuggerStatus::SuccessTerminateDebugger) => break,
+                                Ok(DebuggerStatus::TerminateDebugger) => break,
                                 // This is handled in process_next_request() and should never show up here
-                                Ok(DebuggerStatus::SuccessContinueSession) => {
+                                Ok(DebuggerStatus::ContinueSession) => {
                                     log::error!("probe-rs-debugger enountered unexpected `DebuggerStatus` in debug() execution. Please report this as a bug.");
                                 }
                             }
