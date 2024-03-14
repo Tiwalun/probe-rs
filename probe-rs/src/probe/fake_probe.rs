@@ -8,7 +8,7 @@ use crate::{
         ap::{memory_ap::mock::MockMemoryAp, AccessPort, MemoryAp},
         armv8m::Dhcsr,
         communication_interface::{
-            ArmDebugState, Initialized, SwdSequence, Uninitialized, UninitializedArmProbe,
+            ArmDebugState, DapProbe, Initialized, SwdSequence, Uninitialized, UninitializedArmProbe,
         },
         memory::adi_v5_memory_interface::{ADIMemoryInterface, ArmProbe},
         sequences::ArmDebugSequence,
@@ -412,6 +412,8 @@ impl RawDapAccess for FakeProbe {
         Ok(())
     }
 }
+
+impl DapProbe for FakeProbe {}
 
 #[derive(Debug)]
 struct FakeArmInterface<S: ArmDebugState> {
