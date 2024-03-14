@@ -348,9 +348,11 @@ pub struct ArmCommunicationInterface<S: ArmDebugState> {
 
 impl<S: ArmDebugState> Drop for ArmCommunicationInterface<S> {
     fn drop(&mut self) {
-        let mut probe = std::mem::replace(&mut self.probe, Box::new(FakeProbe::new()));
-        self.dropped = true;
-        self.state.disconnect(&mut *probe);
+        if !self.dropped {
+            let mut probe = std::mem::replace(&mut self.probe, Box::new(FakeProbe::new()));
+            self.dropped = true;
+            self.state.disconnect(&mut *probe);
+        }
     }
 }
 
