@@ -252,12 +252,33 @@ pub enum ProbeCreationError {
     /// A USB error occurred.
     Usb(#[source] std::io::Error),
 
+    /// Error connecting to a probe over TCP
+    Tcp(#[source] std::io::Error),
+
     /// An error specific with the selected probe occurred.
     ProbeSpecific(#[source] BoxedProbeError),
 
     /// Something else happened.
     #[display("{0}")]
     Other(&'static str),
+}
+
+impl From<nusb::Error> for ProbeCreationError {
+    fn from(e: nusb::Error) -> Self {
+        Self::Usb(std::io::Error::from(e))
+    }
+}
+
+impl From<nusb::transfer::TransferError> for ProbeCreationError {
+    fn from(e: nusb::transfer::TransferError) -> Self {
+        Self::Usb(std::io::Error::from(e))
+    }
+}
+
+impl From<nusb::GetDescriptorError> for ProbeCreationError {
+    fn from(e: nusb::GetDescriptorError) -> Self {
+        Self::Usb(std::io::Error::from(e))
+    }
 }
 
 impl<T: ProbeError> From<T> for ProbeCreationError {

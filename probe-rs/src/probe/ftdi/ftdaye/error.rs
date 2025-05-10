@@ -1,4 +1,4 @@
-use nusb::descriptors::ActiveConfigurationError;
+use nusb::ActiveConfigurationError;
 
 use crate::probe::{ProbeError, ftdi::ftdaye::ChipType};
 
@@ -10,7 +10,7 @@ pub enum FtdiError {
     /// operation. It may indicate that the USB device was unplugged, that another application or an
     /// operating system driver is currently using it, or that the current user does not have
     /// permission to access it.
-    Usb(#[from] nusb::Error),
+    Usb(#[source] std::io::Error),
 
     #[error("Unsupported chip type: {0:?}")]
     /// The connected device is not supported by the driver.
@@ -22,6 +22,30 @@ pub enum FtdiError {
     #[error("{0}")]
     /// An unspecified error occurred.
     Other(String),
+}
+
+impl From<nusb::Error> for FtdiError {
+    fn from(e: nusb::Error) -> Self {
+        Self::Usb(std::io::Error::from(e))
+    }
+}
+
+impl From<nusb::transfer::TransferError> for FtdiError {
+    fn from(e: nusb::transfer::TransferError) -> Self {
+        Self::Usb(std::io::Error::from(e))
+    }
+}
+
+impl From<nusb::GetDescriptorError> for FtdiError {
+    fn from(e: nusb::GetDescriptorError) -> Self {
+        Self::Usb(std::io::Error::from(e))
+    }
+}
+
+impl From<std::io::Error> for FtdiError {
+    fn from(e: std::io::Error) -> Self {
+        Self::Usb(e)
+    }
 }
 
 impl ProbeError for FtdiError {}

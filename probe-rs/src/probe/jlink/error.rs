@@ -13,7 +13,7 @@ pub enum JlinkError {
     /// operation. It may indicate that the USB device was unplugged, that another application or an
     /// operating system driver is currently using it, or that the current user does not have
     /// permission to access it.
-    Usb(#[from] nusb::Error),
+    Usb(#[source] std::io::Error),
 
     #[error("device is missing capabilities ({0:?}) for operation")]
     /// An operation was attempted that is not supported by the probe.
@@ -39,6 +39,30 @@ pub enum JlinkError {
 
     #[error("{0}")]
     Other(String),
+}
+
+impl From<nusb::Error> for JlinkError {
+    fn from(e: nusb::Error) -> Self {
+        Self::Usb(std::io::Error::from(e))
+    }
+}
+
+impl From<nusb::transfer::TransferError> for JlinkError {
+    fn from(e: nusb::transfer::TransferError) -> Self {
+        Self::Usb(std::io::Error::from(e))
+    }
+}
+
+impl From<nusb::GetDescriptorError> for JlinkError {
+    fn from(e: nusb::GetDescriptorError) -> Self {
+        Self::Usb(std::io::Error::from(e))
+    }
+}
+
+impl From<std::io::Error> for JlinkError {
+    fn from(e: std::io::Error) -> Self {
+        Self::Usb(e)
+    }
 }
 
 impl ProbeError for JlinkError {}

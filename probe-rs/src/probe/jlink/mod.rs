@@ -16,8 +16,9 @@ use std::time::{Duration, Instant};
 use bitvec::prelude::*;
 
 use itertools::Itertools;
-use nusb::DeviceInfo;
-use nusb::transfer::{Direction, EndpointType};
+use nusb::descriptors::TransferType;
+use nusb::transfer::Direction;
+use nusb::{DeviceInfo, MaybeFuture};
 
 use self::bits::BitIter;
 use self::capabilities::{Capabilities, Capability};
@@ -65,7 +66,7 @@ impl std::fmt::Display for JLinkFactory {
 
 impl ProbeFactory for JLinkFactory {
     fn open(&self, selector: &DebugProbeSelector) -> Result<Box<dyn DebugProbe>, DebugProbeError> {
-        fn open_error(e: std::io::Error, while_: &'static str) -> DebugProbeError {
+        fn open_error(e: nusb::Error, while_: &'static str) -> DebugProbeError {
             let help = if cfg!(windows) {
                 "(this error may be caused by not having the WinUSB driver installed; use Zadig (https://zadig.akeo.ie/) to install it for the J-Link device; this will replace the SEGGER J-Link driver)"
             } else {
@@ -78,7 +79,8 @@ impl ProbeFactory for JLinkFactory {
         }
 
         let mut jlinks = nusb::list_devices()
-            .map_err(DebugProbeError::Usb)?
+            .wait()
+            .map_err(|e| DebugProbeError::Usb(std::io::Error::from(e)))?
             .filter(is_jlink)
             .filter(|info| selector.matches(info))
             .collect::<Vec<_>>();
@@ -95,6 +97,7 @@ impl ProbeFactory for JLinkFactory {
 
         let handle = info
             .open()
+            .wait()
             .map_err(|e| open_error(e, "opening the USB device"))?;
 
         let configs: Vec<_> = handle.configurations().collect();
@@ -137,7 +140,7 @@ impl ProbeFactory for JLinkFactory {
 
                     if !endpoints
                         .iter()
-                        .all(|ep| ep.transfer_type() == EndpointType::Bulk)
+                        .all(|ep| ep.transfer_type() == TransferType::Bulk)
                     {
                         tracing::warn!(
                             "encountered non-bulk endpoints, skipping interface: {:#x?}",
@@ -171,6 +174,7 @@ impl ProbeFactory for JLinkFactory {
 
         let handle = handle
             .claim_interface(intf)
+            .wait()
             .map_err(|e| open_error(e, "taking control over USB device"))?;
 
         let mut this = JLink {
@@ -1270,7 +1274,7 @@ impl SwoAccess for JLink {
 
 #[tracing::instrument]
 fn list_jlink_devices() -> Vec<DebugProbeInfo> {
-    let Ok(devices) = nusb::list_devices() else {
+    let Ok(devices) = nusb::list_devices().wait() else {
         return vec![];
     };
 

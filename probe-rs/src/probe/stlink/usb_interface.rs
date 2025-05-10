@@ -1,4 +1,4 @@
-use nusb::DeviceInfo;
+use nusb::{DeviceInfo, MaybeFuture};
 use std::{sync::LazyLock, time::Duration};
 
 use crate::probe::{stlink::StlinkError, usb_util::InterfaceExt};
@@ -107,14 +107,14 @@ impl StLinkUsbDevice {
     /// Creates and initializes a new USB device.
     pub fn new_from_selector(selector: &DebugProbeSelector) -> Result<Self, ProbeCreationError> {
         let device = nusb::list_devices()
-            .map_err(ProbeCreationError::Usb)?
+            .wait()?
             .filter(is_stlink_device)
             .find(|device| selector_matches(selector, device))
             .ok_or(ProbeCreationError::NotFound)?;
 
         let info = USB_PID_EP_MAP[&device.product_id()].clone();
 
-        let device_handle = device.open().map_err(ProbeCreationError::Usb)?;
+        let device_handle = device.open().wait()?;
         tracing::debug!("Aquired handle for probe");
 
         let mut endpoint_out = false;
@@ -146,9 +146,7 @@ impl StLinkUsbDevice {
             return Err(StlinkError::EndpointNotFound.into());
         }
 
-        let interface = device_handle
-            .claim_interface(0)
-            .map_err(ProbeCreationError::Usb)?;
+        let interface = device_handle.claim_interface(0).wait()?;
 
         tracing::debug!("Claimed interface 0 of USB device.");
 
@@ -268,6 +266,9 @@ impl StLinkUsb for StLinkUsbDevice {
     /// STLink does not respond to USB requests.
     fn reset(&mut self) -> Result<(), StlinkError> {
         tracing::debug!("Resetting USB device of STLink");
-        self.device_handle.reset().map_err(StlinkError::Usb)
+        self.device_handle
+            .reset()
+            .wait()
+            .map_err(|e| StlinkError::Usb(e.into()))
     }
 }

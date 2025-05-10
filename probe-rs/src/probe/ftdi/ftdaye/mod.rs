@@ -4,14 +4,15 @@ use std::collections::VecDeque;
 use std::io::{self, Read, Write};
 use std::time::Duration;
 
-use nusb::DeviceInfo;
+use nusb::descriptors::TransferType;
+use nusb::{DeviceInfo, MaybeFuture};
 
 use error::FtdiError;
-use nusb::transfer::{Control, ControlType, Direction, EndpointType, Recipient};
+use nusb::transfer::{ControlOut, ControlType, Direction, Recipient};
 use tracing::{debug, trace, warn};
 
-use crate::probe::DebugProbeError;
 use crate::probe::usb_util::InterfaceExt;
+use crate::probe::{DebugProbeError, ProbeCreationError};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ChipType {
@@ -95,17 +96,18 @@ impl FtdiContext {
     fn sio_write(&mut self, request: u8, value: u16) -> Result<()> {
         let result = self
             .handle
-            .control_out_blocking(
-                Control {
+            .control_out(
+                ControlOut {
                     control_type: ControlType::Vendor,
                     recipient: Recipient::Device,
                     request,
                     value,
                     index: self.interface.index(),
+                    data: &[],
                 },
-                &[],
                 self.usb_write_timeout,
             )
+            .wait()
             .map_err(std::io::Error::from)?;
 
         tracing::debug!("Response to {:02X}/{:04X}: {:?}", request, value, result);
@@ -291,7 +293,7 @@ impl std::fmt::Debug for Device {
 
 impl Device {
     fn open(usb_device: DeviceInfo, interface: Interface) -> Result<Self, DebugProbeError> {
-        fn open_error(e: std::io::Error, while_: &'static str) -> DebugProbeError {
+        fn open_error(e: nusb::Error, while_: &'static str) -> DebugProbeError {
             let help = if cfg!(windows) {
                 "(this error may be caused by not having the WinUSB driver installed; use Zadig (https://zadig.akeo.ie/) to install it for the FTDI device; this will replace the FTDI driver)"
             } else {
@@ -305,6 +307,7 @@ impl Device {
 
         let handle = usb_device
             .open()
+            .wait()
             .map_err(|e| open_error(e, "opening the USB device"))?;
 
         let configs: Vec<_> = handle.configurations().collect();
@@ -322,7 +325,8 @@ impl Device {
                 if configuration != conf.configuration_value() {
                     handle
                         .set_configuration(conf.configuration_value())
-                        .map_err(FtdiError::Usb)?;
+                        .wait()
+                        .map_err(ProbeCreationError::from)?;
                 }
             }
         }
@@ -344,7 +348,7 @@ impl Device {
 
                 if endpoints
                     .iter()
-                    .any(|ep| ep.transfer_type() != EndpointType::Bulk)
+                    .any(|ep| ep.transfer_type() != TransferType::Bulk)
                 {
                     warn!(
                         "encountered non-bulk endpoints, skipping interface: {:#x?}",
@@ -417,6 +421,7 @@ impl Device {
 
         let handle = handle
             .detach_and_claim_interface(intf)
+            .wait()
             .map_err(|e| open_error(e, "taking control over USB device"))?;
 
         tracing::debug!("Opened FTDI device: {:?}", chip_type);

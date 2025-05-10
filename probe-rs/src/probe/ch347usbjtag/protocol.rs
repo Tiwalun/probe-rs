@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use bitvec::vec::BitVec;
-use nusb::{DeviceInfo, Interface};
+use nusb::{DeviceInfo, Interface, MaybeFuture};
 
 use crate::probe::{
     self, DebugProbeError, DebugProbeInfo, DebugProbeSelector, ProbeCreationError,
@@ -82,12 +82,18 @@ impl Ch347UsbJtagDevice {
         selector: &DebugProbeSelector,
     ) -> Result<Self, ProbeCreationError> {
         let device = nusb::list_devices()
+            .wait()
+            .map_err(std::io::Error::from)
             .map_err(ProbeCreationError::Usb)?
             .filter(is_ch34x_device)
             .find(|device| selector.matches(device))
             .ok_or(ProbeCreationError::NotFound)?;
 
-        let device_handle = device.open().map_err(probe::ProbeCreationError::Usb)?;
+        let device_handle = device
+            .open()
+            .wait()
+            .map_err(std::io::Error::from)
+            .map_err(probe::ProbeCreationError::Usb)?;
 
         let config = device_handle
             .configurations()
@@ -114,9 +120,7 @@ impl Ch347UsbJtagDevice {
 
         // ch347f default in 4
         // buf ch347t i dnot know as i not have
-        let interface = device_handle
-            .claim_interface(4)
-            .map_err(ProbeCreationError::Usb)?;
+        let interface = device_handle.claim_interface(4).wait()?;
 
         // set 15MHz speed, and check pack mode
         let mut obuf = [0xD0, 0x06, 0x00, 0x00, 0x07, 0x30, 0x30, 0x30, 0x30];
@@ -277,7 +281,7 @@ impl Ch347UsbJtagDevice {
 }
 
 pub(super) fn list_ch347usbjtag_devices() -> Vec<DebugProbeInfo> {
-    let Ok(devices) = nusb::list_devices() else {
+    let Ok(devices) = nusb::list_devices().wait() else {
         return vec![];
     };
 

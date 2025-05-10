@@ -1427,7 +1427,7 @@ impl ProbeFactory for BlackMagicProbeFactory {
             if let Ok(connection) = std::net::TcpStream::connect(serial_number) {
                 let reader = connection;
                 let writer = reader.try_clone().map_err(|e| {
-                    DebugProbeError::ProbeCouldNotBeCreated(ProbeCreationError::Usb(e))
+                    DebugProbeError::ProbeCouldNotBeCreated(ProbeCreationError::Tcp(e))
                 })?;
                 return BlackMagicProbe::new(Box::new(reader), Box::new(writer))
                     .map(|p| Box::new(p) as Box<dyn DebugProbe>);

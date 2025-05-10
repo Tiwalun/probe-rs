@@ -1,10 +1,8 @@
-use std::io;
+use std::io::{Read, Write};
 
-use async_io::block_on;
-use futures_lite::future;
 use nusb::{
-    Interface,
-    transfer::{Direction, RequestBuffer},
+    Interface, MaybeFuture,
+    transfer::{Bulk, Direction, In, Out},
 };
 
 use crate::probe::{
@@ -46,10 +44,10 @@ impl GlasgowUsbDevice {
             ..selector.clone()
         };
         let device_info = nusb::list_devices()
-            .map_err(ProbeCreationError::Usb)?
+            .wait()?
             .find(|device| selector.matches(device))
             .ok_or(ProbeCreationError::NotFound)?;
-        let device = device_info.open().map_err(ProbeCreationError::Usb)?;
+        let device = device_info.open().wait()?;
 
         let mut in_ep_num = None;
         let mut out_ep_num = None;
@@ -82,20 +80,12 @@ impl GlasgowUsbDevice {
         );
 
         // This makes our endpoints available for use.
-        let out_iface = device
-            .claim_interface(out_iface_num)
-            .map_err(ProbeCreationError::Usb)?;
-        let in_iface = device
-            .claim_interface(in_iface_num)
-            .map_err(ProbeCreationError::Usb)?;
+        let out_iface = device.claim_interface(out_iface_num).wait()?;
+        let in_iface = device.claim_interface(in_iface_num).wait()?;
 
         // This takes the applet out of reset.
-        out_iface
-            .set_alt_setting(1)
-            .map_err(ProbeCreationError::Usb)?;
-        in_iface
-            .set_alt_setting(1)
-            .map_err(ProbeCreationError::Usb)?;
+        out_iface.set_alt_setting(1).wait()?;
+        in_iface.set_alt_setting(1).wait()?;
 
         Ok(Self {
             out_iface,
@@ -110,38 +100,39 @@ impl GlasgowUsbDevice {
         output: Vec<u8>,
         mut input: impl FnMut(Vec<u8>) -> Result<bool, DebugProbeError>,
     ) -> Result<(), DebugProbeError> {
-        block_on(async {
-            let out_fut = async {
-                if !output.is_empty() {
-                    tracing::trace!("OUT URB: {}", hexdump(&output));
-                    let out_buffer_len = output.len();
-                    let out_completion = self.out_iface.bulk_out(self.out_ep_num, output).await;
-                    out_completion
-                        .status
-                        .map_err(io::Error::other)
-                        .map_err(DebugProbeError::Usb)?;
-                    assert!(out_completion.data.actual_length() == out_buffer_len);
-                }
-                Ok(())
-            };
-            let in_fut = async {
-                let mut buffer = Vec::new();
-                while !input(buffer)? {
-                    let in_completion = self
-                        .in_iface
-                        .bulk_in(self.in_ep_num, RequestBuffer::new(65536))
-                        .await;
-                    in_completion
-                        .status
-                        .map_err(io::Error::other)
-                        .map_err(DebugProbeError::Usb)?;
-                    tracing::trace!("IN URB: {}", hexdump(in_completion.data.as_slice()));
-                    buffer = in_completion.data;
-                }
-                Ok::<(), DebugProbeError>(())
-            };
-            let (out_result, in_result) = future::zip(out_fut, in_fut).await;
-            out_result.and(in_result)
-        })
+        if !output.is_empty() {
+            tracing::trace!("OUT URB: {}", hexdump(&output));
+
+            let tx = self
+                .out_iface
+                .endpoint::<Bulk, Out>(self.out_ep_num)
+                .map_err(std::io::Error::from)
+                .map_err(DebugProbeError::Usb)?;
+
+            let mut writer = tx.writer(output.len());
+
+            writer.write_all(&output).map_err(DebugProbeError::Usb)?;
+            writer.flush_end().map_err(DebugProbeError::Usb)?;
+        }
+
+        let rx = self
+            .in_iface
+            .endpoint::<Bulk, In>(self.in_ep_num)
+            .map_err(std::io::Error::from)
+            .map_err(DebugProbeError::Usb)?;
+
+        let mut reader = rx.reader(65536);
+
+        let mut buffer = Vec::new();
+
+        while !input(buffer)? {
+            buffer = vec![0u8; 65536];
+
+            let buffer_len = reader.read(&mut buffer[..]).map_err(DebugProbeError::Usb)?;
+            buffer.truncate(buffer_len);
+
+            tracing::trace!("IN URB: {}", hexdump(&buffer));
+        }
+        Ok(())
     }
 }
