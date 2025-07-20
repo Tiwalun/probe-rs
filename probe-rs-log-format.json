@@ -1,0 +1,71 @@
+{
+  "$schema": "https://lnav.org/schemas/format-v1.schema.json",
+  "probe_rs": {
+    "title": "probe-rs Log Format",
+    "description": "JSON structured logs from probe-rs",
+    "json": true,
+    "multiline": false,
+    "line-format": [
+      {
+        "field": "__timestamp__"
+      },
+      " ",
+      {
+        "field": "level",
+        "min-width": 5,
+        "align": "left"
+      },
+      " [",
+      {
+        "field": "target",
+        "max-width": 40,
+        "overflow": "truncate"
+      },
+      "] ",
+      {
+        "field": "fields/message"
+      }
+    ],
+    "level-field": "level",
+    "level": {
+      "error": "ERROR",
+      "warning": "WARN",
+      "info": "INFO",
+      "debug": "DEBUG",
+      "trace": "TRACE"
+    },
+    "timestamp-field": "timestamp",
+    "timestamp-format": ["%Y-%m-%dT%H:%M:%S.%fZ"],
+    "body-field": "fields/message",
+    "value": {
+      "target": {
+        "kind": "string",
+        "identifier": true
+      },
+      "filename": {
+        "kind": "string",
+        "hidden": true
+      },
+      "line_number": {
+        "kind": "integer",
+        "hidden": true
+      },
+      "fields/message": {
+        "kind": "string"
+      },
+      "span": {
+        "kind": "json",
+        "hidden": true
+      },
+      "spans": {
+        "kind": "json",
+        "hidden": true
+      }
+    },
+    "sample": [
+      {
+        "line": "{\"timestamp\":\"2025-07-19T00:33:45.736445Z\",\"level\":\"DEBUG\",\"fields\":{\"message\":\"sysfs read \\\"/sys/bus/usb/devices/1-9/serial\\\": Err(Os { code: 2, kind: NotFound, message: \\\"No such file or directory\\\" })\",\"log.target\":\"nusb::platform::linux_usbfs::enumeration\",\"log.module_path\":\"nusb::platform::linux_usbfs::enumeration\",\"log.file\":\"/home/s/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/nusb-0.1.14/src/platform/linux_usbfs/enumeration.rs\",\"log.line\":25},\"target\":\"nusb::platform::linux_usbfs::enumeration\",\"filename\":\"/home/s/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/nusb-0.1.14/src/platform/linux_usbfs/enumeration.rs\",\"line_number\":25}"
+      }
+    ]
+  }
+}
